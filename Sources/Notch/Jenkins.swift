@@ -538,11 +538,13 @@ enum Keychain {
         let count = running.count
         status = count == 0 ? "No builds of yours running" : "\(count) build\(count == 1 ? "" : "s") of yours running"
         looking = false
-        remember(jobsOf: current.filter { !$0.queued } + gone)
+        let newJob = remember(jobsOf: current.filter { !$0.queued } + gone)
         onChange?()
         if !running.isEmpty || !gone.isEmpty { lastActivity = Date() }
         schedule(in: Self.interval(running: !running.isEmpty, quietFor: Date().timeIntervalSince(lastActivity)))
-        // Your build history: at the start, then every half hour.
+        // Your build history: at the start, then every half hour, and at once when you build in a
+        // job for the first time (its earlier builds of yours, even ones no look caught, show).
+        if newJob { historyLoadedAt = nil }
         if historyLoadedAt.map({ Date().timeIntervalSince($0) > 1800 }) ?? true {
             await loadHistory(server: server, user: user, token: token)
         }
@@ -554,8 +556,12 @@ enum Keychain {
     static func jobURL(of build: JenkinsBuild) -> URL { build.url.deletingLastPathComponent() }
 
     /// Jobs you've built, most recent first, kept in settings so the history survives restarts.
-    private func remember(jobsOf builds: [JenkinsBuild]) {
-        guard !builds.isEmpty else { return }
+    /// True when one of them is new to the list.
+    @discardableResult
+    private func remember(jobsOf builds: [JenkinsBuild]) -> Bool {
+        guard !builds.isEmpty else { return false }
+        let known = Set(settings.jenkinsJobs)
+        let added = builds.contains { !known.contains(Self.jobURL(of: $0).absoluteString) }
         var jobs = settings.jenkinsJobs
         for build in builds.reversed() {
             let job = Self.jobURL(of: build).absoluteString
@@ -564,6 +570,7 @@ enum Keychain {
         }
         jobs = Array(jobs.prefix(8))
         if jobs != settings.jenkinsJobs { SettingsStore.shared.value.jenkinsJobs = jobs }
+        return added
     }
 
     /// Your latest finished builds: each job you've built is asked for its last 30 builds (one
@@ -662,11 +669,12 @@ enum Keychain {
     /// Builds come in bursts: within this long of the last one, keep looking often.
     static let burst: TimeInterval = 600
 
-    /// Until the next look: quick while a build of yours runs, then thinning out the longer
-    /// it's been quiet.
+    /// Until the next look: quick while a build of yours runs; a minute for a while after one,
+    /// then every two minutes. Not longer: a build that starts and ends between two looks is
+    /// never seen running (a 4-minute merge slipped between 5-minute looks).
     static func interval(running: Bool, quietFor: TimeInterval) -> TimeInterval {
         if running { return 20 }
-        return quietFor < burst ? 90 : quietFor < 1800 ? 180 : 300
+        return quietFor < burst ? 60 : 120
     }
 
     /// You pushed to one of your PRs, which often starts builds: look in a moment and keep

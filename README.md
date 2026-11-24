@@ -157,9 +157,12 @@ macOS's `security` tool, the way gh keeps its token (never in the settings file)
 belongs to that tool rather than one build of Notch, so rebuilding never brings up a keychain
 prompt, and it's read off the main thread. **Sign out** removes it. Notch only reads. Every 20 s while a build
 of yours runs (executors, queue, stages: about 540 small requests an hour, only then).
-Otherwise builds come in bursts, so the looks thin out: every 90 s for 10 minutes after
-anything of yours ran, every 3 minutes until half an hour, then every 5 minutes asking only
-the executors (about 12 requests an hour). A push to one of your PRs brings a look forward.
+Otherwise builds come in bursts: every minute for 10 minutes after anything of yours ran
+(executors and queue), then every 2 minutes asking only the executors (about 30 small
+requests an hour, ~20 KB each). Not less often: a build that starts and ends between two looks
+is never seen running. A push to one of your PRs brings a look forward. The first time Notch
+sees you build in a job, it reads that job's history at once, so an earlier build there that
+slipped between looks still shows in your history.
 Nothing while you're away; a job without the stage view is asked once and then left alone.
 
 ## Meetings
