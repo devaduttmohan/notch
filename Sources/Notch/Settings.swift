@@ -46,6 +46,7 @@ struct NotchSettings: Codable, Equatable {
     var music = true
     var timers = true
     var claude = true
+    var claudeBackground = true               // Claude's background tasks (needs claude on)
     var commands = true
     var battery = true
     var headphones = true

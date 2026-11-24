@@ -456,7 +456,8 @@ enum Activity: Equatable {
             layout.size = new.size
             layout.roundness = new.roundness
         }
-        if !new.claude { claudeWaits.removeAll(); claudeUpdates.removeAll(); backgroundTasks.removeAll() }
+        if !new.claude { claudeWaits.removeAll(); claudeUpdates.removeAll() }
+        if !new.claude || !new.claudeBackground { backgroundTasks.removeAll() }
         if !new.timers { timer = nil }
         if !new.meetings { meeting = nil }
         if !new.systemHealth { runaway = nil }
@@ -539,7 +540,7 @@ enum Activity: Equatable {
         if let meeting, !meeting.prominent { list.append(.meeting(meeting)) }
         if let timer { list.append(.timer(timer)) }
         if let builds, builds.live, settings.builds { list.append(.builds(builds)) }
-        if !backgroundTasks.isEmpty, settings.claude { list.append(.claudeBackground(backgroundTasks)) }
+        if !backgroundTasks.isEmpty, showsBackground { list.append(.claudeBackground(backgroundTasks)) }
         if let prSummary, prSummary.live, settings.pullRequests { list.append(.pullRequests(prSummary)) }
         if let load = loadInPill, !load.pressing { list.append(.load(load)) }  // calm ("Always"), or memory only elevated
         if let nowPlaying, !nowPlaying.isPlaying { list.append(.nowPlaying(nowPlaying)) }
@@ -722,7 +723,7 @@ enum Activity: Equatable {
             return .listFit((loadContentHeight + layout.geometry.notchSize.height + 16).rounded(.up))
         case .claude, .claudeUpdate, .claudeBackground:
             // Claude's page grows to fit the background work listed on it.
-            guard !backgroundTasks.isEmpty, settings.claude, claudeContentHeight > 0 else { return .standard }
+            guard !backgroundTasks.isEmpty, showsBackground, claudeContentHeight > 0 else { return .standard }
             return .listFit((claudeContentHeight + layout.geometry.notchSize.height + 16).rounded(.up))
         default: return .standard
         }
@@ -1036,9 +1037,12 @@ enum Activity: Equatable {
 
     // MARK: Claude's background work
 
+    /// Claude Code on, and its background tasks too (Customise › Modules).
+    private var showsBackground: Bool { settings.claude && settings.claudeBackground }
+
     /// A task launched in the background (from its tool call): it shows with its time from now.
     func backgroundStarted(_ task: BackgroundTask) {
-        guard settings.claude, !backgroundTasks.contains(where: { $0.id == task.id }) else { return }
+        guard showsBackground, !backgroundTasks.contains(where: { $0.id == task.id }) else { return }
         if !quiet { log("claude: \(task.project) started \"\(task.title)\" in the background (\(task.kindName))") }
         backgroundTasks.append(task)
         if backgroundTasks.count > 30 { backgroundTasks.removeFirst(backgroundTasks.count - 30) }
@@ -1047,7 +1051,7 @@ enum Activity: Equatable {
     /// A session's list at the end of a turn: what's on it is running (keeping the times already
     /// known); what of that session's isn't has finished.
     func backgroundRunning(session: String, _ tasks: [BackgroundTask]) {
-        guard settings.claude else { return }
+        guard showsBackground else { return }
         let listed = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var next: [BackgroundTask] = backgroundTasks.compactMap { known in
             guard known.session == session else { return known }

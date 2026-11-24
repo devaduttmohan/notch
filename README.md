@@ -363,7 +363,8 @@ PostToolUse and SessionEnd:
   tool call (PostToolUse); each turn's end (Stop's `background_tasks`) says what's
   still running, and one that's gone has finished. Claude Code reports no progress,
   estimate or exit code for them, so the ring only turns, and a finished one simply
-  leaves. Needs `notchctl` from this version (it forwards those fields).
+  leaves. Needs `notchctl` from this version (it forwards those fields). Switch it
+  off in Customise › Modules › **Background tasks** (it needs Claude Code on).
 - Finished / ended updates **stay on the notch until you look**: hover it (it opens
   with the details) and move away, or press **Dismiss**. A brush past under half a
   second doesn't count. Several waiting show a count; a passing banner (charging, a

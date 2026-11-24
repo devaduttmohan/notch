@@ -743,7 +743,11 @@ struct ModulesPane: View {
             ModuleCard(symbol: MeetingIcon.calendarName + ".fill", color: Color(red: 1, green: 0.3, blue: 0.25), title: "Meetings",
                        detail: "Countdown to your next meeting, and Join.", isOn: $store.value.meetings)
             ModuleCard(symbol: "sparkle", color: .claude, title: "Claude Code",
-                       detail: "Needs you, finished, background tasks.", isOn: $store.value.claude)
+                       detail: "Needs you, finished, session ended.", isOn: $store.value.claude)
+            ModuleCard(symbol: "arrow.triangle.2.circlepath", color: .claude, title: "Background tasks",
+                       detail: store.value.claude ? "Claude's background work, under its page."
+                                                  : "Turn on Claude Code to use this.",
+                       isOn: $store.value.claudeBackground, available: store.value.claude)
             ModuleCard(symbol: "terminal.fill", color: Color(white: 0.4), title: "Command alerts",
                        detail: "notchctl say and notchctl run.", isOn: $store.value.commands)
             ModuleCard(symbol: "timer", color: .orange, title: "Timers",
@@ -1501,12 +1505,13 @@ private struct ModuleCard: View {
     let title: String
     let detail: String
     @Binding var isOn: Bool
+    var available = true                  // false: depends on a module that's off (dimmed, not hidden)
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             IconTile(symbol: symbol, color: color, size: 32)
-                .saturation(isOn ? 1 : 0)
-                .opacity(isOn ? 1 : 0.55)
+                .saturation(isOn && available ? 1 : 0)
+                .opacity(isOn && available ? 1 : 0.55)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.system(size: 13, weight: .semibold))
                 Text(detail).font(.system(size: 11.5)).foregroundStyle(Palette.secondary)
@@ -1519,7 +1524,10 @@ private struct ModuleCard: View {
         .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Palette.card))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.cardStroke))
+        .opacity(available ? 1 : 0.5)
+        .allowsHitTesting(available)
         .animation(UISpring.snap, value: isOn)
+        .animation(UISpring.soft, value: available)
     }
 }
 
