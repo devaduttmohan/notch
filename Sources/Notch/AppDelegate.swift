@@ -25,6 +25,7 @@ import Combine
     func applicationDidFinishLaunching(_ notification: Notification) {
         log("starting \(Meetings.runningAsApp ? "from \(Bundle.main.bundlePath)" : "from swift run")")
         LoginItem.followMove()
+        NSApp.mainMenu = Self.mainMenu()
         let model = NotchModel(layout: NotchLayout.current())
         self.model = model
         controller = NotchController(model: model)
@@ -34,6 +35,7 @@ import Combine
         startMeetings(for: model)
         startHealthAndKeepAwake(for: model)
         startPullRequests(for: model)
+        startBuilds(for: model)
         model.openCustomiser = { [weak self] in self?.openCustomiser() }
         model.openClaudeSession = { [weak self] session in self?.claude?.open(session: session) }
         setUpStatusItem()
@@ -79,6 +81,12 @@ import Combine
                 guard let self else { return }
                 self.keepAwake.settingsChanged(new)
                 let before = SettingsStore.shared.value          // (the sink fires just before the change)
+                if new.builds != before.builds {
+                    DispatchQueue.main.async {
+                        if new.builds { JenkinsWatcher.shared.start() }
+                        JenkinsWatcher.shared.onChange?()
+                    }
+                }
                 if new.pullRequests != before.pullRequests || new.prIgnoredAuthors != before.prIgnoredAuthors {
                     DispatchQueue.main.async {
                         self.prs.onChange?()
@@ -114,6 +122,24 @@ import Combine
         }
         model.prsSeen = { [weak self] in self?.prs.markSeen() }
         prs.start()
+    }
+
+    /// Jenkins builds you start: a pill with their progress, a banner when they end.
+    private func startBuilds(for model: NotchModel) {
+        let jenkins = JenkinsWatcher.shared
+        jenkins.isAway = { [weak self] in !(self?.prs.away.isEmpty ?? true) }
+        jenkins.gitHubLogin = { [weak self] in self?.prs.login }
+        jenkins.onChange = { [weak model] in
+            guard let model else { return }
+            let settings = SettingsStore.shared.value
+            model.jenkinsServer = JenkinsWatcher.serverURL(settings.jenkinsURL)
+            model.builds = settings.builds && jenkins.phase == .signedIn ? jenkins.summary : nil
+        }
+        jenkins.onFinished = { [weak model] build in model?.show(BuildBanner.banner(for: build)) }
+        model.buildAction = { NSWorkspace.shared.open($0) }
+        model.buildsSeen = { jenkins.markSeen() }
+        prs.onPush = { jenkins.lookSoon() }
+        jenkins.start()
     }
 
     @objc private func toggleKeepAwake() {
@@ -307,4 +333,44 @@ import Combine
     }
     @objc private func clearUpdates() { model?.clearUpdates() }
     @objc private func quit() { NSApp.terminate(nil) }
+
+    /// The menu bar macOS shows while the customiser is open (Notch is a regular app then).
+    /// Its Edit menu is also what makes ⌘X, ⌘C, ⌘V, ⌘A and ⌘Z work in text fields: AppKit
+    /// sends those keys through the menu, and without one they did nothing. No Hide (⌘H):
+    /// hiding the app would hide the island too.
+    static func mainMenu() -> NSMenu {
+        let main = NSMenu()
+        func item(_ title: String, _ action: Selector, _ key: String, _ modifiers: NSEvent.ModifierFlags = .command) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = modifiers
+            return item
+        }
+        func add(_ title: String, _ items: [NSMenuItem]) -> NSMenu {
+            let menu = NSMenu(title: title)
+            items.forEach(menu.addItem)
+            let holder = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            holder.submenu = menu
+            main.addItem(holder)
+            return menu
+        }
+        _ = add("Notch", [
+            item("About Notch", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), ""),
+            .separator(),
+            item("Quit Notch", #selector(NSApplication.terminate(_:)), "q"),
+        ])
+        _ = add("Edit", [
+            item("Undo", Selector(("undo:")), "z"),
+            item("Redo", Selector(("redo:")), "z", [.command, .shift]),
+            .separator(),
+            item("Cut", #selector(NSText.cut(_:)), "x"),
+            item("Copy", #selector(NSText.copy(_:)), "c"),
+            item("Paste", #selector(NSText.paste(_:)), "v"),
+            item("Select All", #selector(NSText.selectAll(_:)), "a"),
+        ])
+        NSApp.windowsMenu = add("Window", [
+            item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
+            item("Close", #selector(NSWindow.performClose(_:)), "w"),
+        ])
+        return main
+    }
 }

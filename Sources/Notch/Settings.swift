@@ -26,6 +26,7 @@ struct NotchSettings: Codable, Equatable {
     var haptics = true
     var sounds = true
     var display: DisplayChoice = .notched
+    var pinAboveSpaces = true                 // stay on screen through Space switches (private window-server API)
 
     // Modules
     var music = true
@@ -37,6 +38,10 @@ struct NotchSettings: Codable, Equatable {
     var meetings = true
     var systemHealth = true
     var pullRequests = true
+    var builds = false                        // Jenkins builds you start (on once you sign in)
+    var jenkinsURL = ""
+    var jenkinsUser = ""
+    var jenkinsJobs: [String] = []            // jobs you've built (learned), for your build history
 
     // Meetings
     var meetingLead = 10                      // minutes before a meeting that the pill appears

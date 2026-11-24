@@ -586,6 +586,10 @@ struct BehaviourPane: View {
                     NSegmented(selection: $store.value.display, options: DisplayChoice.allCases.map { ($0, $0.name) })
                         .frame(width: 290)
                 }
+                NRow(title: "Stay put when switching Spaces",
+                     detail: "Keeps the island on screen through swipes and full-screen apps, using a private macOS window-server feature. If a macOS update breaks it, Notch falls back by itself; turn it off if anything looks wrong.") {
+                    NToggle(isOn: $store.value.pinAboveSpaces, tint: Palette.tint)
+                }
             }
             NCard(title: "Startup", symbol: "power") {
                 NRow(title: "Open at login", detail: login.problem ?? (login.available
@@ -678,9 +682,16 @@ struct ModulesPane: View {
                        detail: "Runaway processes, low disk, a hot Mac.", isOn: $store.value.systemHealth)
             ModuleCard(symbol: PullRequestIcon.symbolName, color: Color.prGreen, title: "Pull requests",
                        detail: "Checks, reviews and comments via gh.", isOn: $store.value.pullRequests)
+            ModuleCard(symbol: "hammer.fill", color: .buildBlue, title: "Jenkins builds",
+                       detail: "Builds you start, stage by stage.", isOn: $store.value.builds)
         }
         if store.value.pullRequests {
             PullRequestsCard(store: store, prs: prs, account: prs.account)
+                .padding(.top, 14)
+                .transition(.opacity.combined(with: .offset(y: -8)))
+        }
+        if store.value.builds {
+            JenkinsCard(store: store, jenkins: .shared, prs: prs)
                 .padding(.top, 14)
                 .transition(.opacity.combined(with: .offset(y: -8)))
         }
@@ -1161,6 +1172,134 @@ struct IgnoredAuthorsEditor: View {
             (name.lowercased().contains("bot") ? 0 : 1, -(counts[name] ?? 0), name.lowercased())
         }
         return Array(counts.keys.sorted { rank($0) < rank($1) }.prefix(6))
+    }
+}
+
+
+// MARK: Jenkins
+
+/// Signing in to Jenkins (an API token, kept in the keychain), and what Notch is watching.
+struct JenkinsCard: View {
+    @ObservedObject var store: SettingsStore
+    @ObservedObject var jenkins: JenkinsWatcher
+    let prs: PRWatcher
+    private let server: State<String>
+    private let user: State<String>
+    private let token = State(initialValue: "")
+
+    init(store: SettingsStore, jenkins: JenkinsWatcher, prs: PRWatcher) {
+        self.store = store
+        self.jenkins = jenkins
+        self.prs = prs
+        let saved = store.value.jenkinsURL
+        server = State(initialValue: saved.isEmpty ? (Self.detectedServer(prs)?.absoluteString ?? "") : saved)
+        user = State(initialValue: store.value.jenkinsUser)
+    }
+
+    var body: some View {
+        NCard(title: "Jenkins builds", symbol: "hammer.fill") {
+            Group {
+                if jenkins.phase == .signedIn { signedIn } else { signInForm }
+            }
+            .transition(.blurReplace.combined(with: .opacity))
+        }
+        .animation(UISpring.soft, value: jenkins.phase)
+    }
+
+    private var signedIn: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(Color.buildBlue.gradient)
+                    Text((jenkins.account?.fullName ?? store.value.jenkinsUser).prefix(1).uppercased())
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                }
+                .frame(width: 38, height: 38)
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.14)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(jenkins.account?.fullName ?? store.value.jenkinsUser).font(.system(size: 13, weight: .semibold))
+                    Text("\(jenkins.account?.id ?? store.value.jenkinsUser) on \(JenkinsWatcher.serverURL(store.value.jenkinsURL)?.host ?? "Jenkins")")
+                        .font(.system(size: 11.5)).foregroundStyle(Palette.secondary)
+                }
+                Spacer(minLength: 12)
+                NButton(title: "Sign out", symbol: "rectangle.portrait.and.arrow.right") { jenkins.signOut() }
+            }
+            CardHairline()
+            NRow(title: jenkins.status,
+                 detail: "Any job: builds started by you, or by your pushes, found by asking Jenkins what's running. Every 20 s while one of yours runs; otherwise every 1½ to 5 minutes, slower the longer it's quiet, and soon after you push. Paused while you're away."
+                    + (jenkins.lastLook.map { " Last look \($0.formatted(date: .omitted, time: .standard))." } ?? "")) {
+                NButton(title: "Refresh", symbol: "arrow.clockwise") { jenkins.refresh() }
+            }
+        }
+    }
+
+    private var signInForm: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Sign in to Jenkins").font(.system(size: 13, weight: .semibold))
+                Text("Make an API token in Jenkins (your name › Security › API Token › Add new token) and paste it here. It stays in your keychain; Notch only reads builds.")
+                    .font(.system(size: 11.5)).foregroundStyle(Palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            JenkinsField(label: "Server", text: server.projectedValue, prompt: "jenkins.example.com")
+            HStack(spacing: 10) {
+                JenkinsField(label: "Username", text: user.projectedValue, prompt: "your Jenkins id")
+                JenkinsField(label: "API token", text: token.projectedValue, prompt: "paste the token", secure: true)
+            }
+            if case .failed(let message) = jenkins.phase {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
+                    Text(message).foregroundStyle(Palette.secondary)
+                }
+                .font(.system(size: 11.5))
+                .transition(.opacity.combined(with: .offset(y: -4)))
+            }
+            HStack(spacing: 8) {
+                if let url = JenkinsWatcher.serverURL(server.wrappedValue) {
+                    NButton(title: "Make a token", symbol: "arrow.up.right") {
+                        NSWorkspace.shared.open(url.appendingPathComponent("me/security/"))
+                    }
+                }
+                Spacer()
+                if jenkins.phase == .signingIn { ProgressView().controlSize(.small) }
+                NButton(title: "Sign in", symbol: "arrow.right", prominent: true, tint: Palette.tint) {
+                    jenkins.signIn(server: server.wrappedValue, user: user.wrappedValue, token: token.wrappedValue)
+                    token.wrappedValue = ""
+                }
+                .disabled(jenkins.phase == .signingIn || user.wrappedValue.isEmpty || token.wrappedValue.isEmpty)
+                .opacity(user.wrappedValue.isEmpty || token.wrappedValue.isEmpty ? 0.5 : 1)
+            }
+        }
+    }
+
+    /// The Jenkins your PR checks link to (`…/job/…`), to fill in the server.
+    static func detectedServer(_ prs: PRWatcher) -> URL? {
+        prs.prs.lazy.flatMap(\.checks).compactMap(\.url).first { $0.path.contains("/job/") }
+            .flatMap { url in url.host.flatMap { URL(string: "\(url.scheme ?? "https")://\($0)") } }
+    }
+}
+
+/// A labelled text field in the customiser's style.
+private struct JenkinsField: View {
+    let label: String
+    @Binding var text: String
+    let prompt: String
+    var secure = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label).font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.secondary)
+            Group {
+                if secure { SecureField(prompt, text: $text) } else { TextField(prompt, text: $text) }
+            }
+            .textFieldStyle(.plain)
+            .font(.system(size: 12.5))
+            .autocorrectionDisabled()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.07)))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.white.opacity(0.1)))
+        }
     }
 }
 
