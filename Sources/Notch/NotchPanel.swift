@@ -48,6 +48,10 @@ final class NotchHostingView<Content: View>: NSHostingView<Content> {
     private var swipeUsed = false
     private var settingsWatch: AnyCancellable?
     private var display = SettingsStore.shared.value.display
+    /// The panel's own Space above every other, when that's on and this macOS offers it.
+    private var pinned: PinnedSpace?
+    /// Locked or the screen saver is up: hidden, so nothing shows or takes clicks there.
+    private var screenHidden = false
 
     init(model: NotchModel) {
         self.model = model
@@ -56,6 +60,11 @@ final class NotchHostingView<Content: View>: NSHostingView<Content> {
         hosting.sizingOptions = []          // don't let SwiftUI resize the panel
         panel.contentView = hosting
         panel.orderFrontRegardless()
+        if SettingsStore.shared.value.pinAboveSpaces { pin(true) }
+        // Started behind the lock screen: stay hidden until it's unlocked.
+        if (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool == true {
+            hideForLockScreen(true)
+        }
 
         // The global monitor sees moves sent to other apps; the local one covers our own panel.
         // Mouse-move monitors need no Accessibility permission (key monitors do).
@@ -93,6 +102,9 @@ final class NotchHostingView<Content: View>: NSHostingView<Content> {
                     self.disarm()
                     DispatchQueue.main.async { self.updateClickThrough() }
                 }
+                if new.pinAboveSpaces != SettingsStore.shared.value.pinAboveSpaces {
+                    DispatchQueue.main.async { self.pin(new.pinAboveSpaces) }
+                }
             }
         }
 
@@ -109,6 +121,16 @@ final class NotchHostingView<Content: View>: NSHostingView<Content> {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.spaceChanged() }
         })
+        // A pinned panel sits above everything, the lock screen included: hide it there.
+        let shield: [(String, Bool)] = [("com.apple.screenIsLocked", true), ("com.apple.screenIsUnlocked", false),
+                                        ("com.apple.screensaver.didstart", true), ("com.apple.screensaver.didstop", false)]
+        for (name, hide) in shield {
+            observers.append(DistributedNotificationCenter.default().addObserver(
+                forName: Notification.Name(name), object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.hideForLockScreen(hide) }
+            })
+        }
         // Diagnostics: the app becoming inactive is what used to hide the panel.
         observers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
@@ -206,12 +228,51 @@ final class NotchHostingView<Content: View>: NSHostingView<Content> {
     /// Clicks pass through to the menu bar unless the panel is open (or, with "open on
     /// click", the pointer is on the island).
     private func updateClickThrough() {
-        let clickable = model.state == .expanded || (model.armed && SettingsStore.shared.value.openOn == .click)
+        let clickable = !screenHidden && (model.state == .expanded || (model.armed && SettingsStore.shared.value.openOn == .click))
         panel.ignoresMouseEvents = !clickable
+    }
+
+    /// Into (or out of) the panel's own Space above every other. Off, or not offered by
+    /// this macOS: the usual handling, moving into each Space after a switch.
+    private func pin(_ on: Bool) {
+        if on, pinned == nil, let space = PinnedSpace.make() {
+            if followingCurrentSpace { place(followingCurrentSpace: false) }
+            space.pin(panel)
+            pinned = space
+            log("overlay: pinned above every Space")
+        } else if !on, let space = pinned {
+            space.close()
+            pinned = nil
+            log("overlay: unpinned; moving into each Space after a switch again")
+            spaceChanged()
+        }
+    }
+
+    private func hideForLockScreen(_ hide: Bool) {
+        guard hide != screenHidden else { return }
+        screenHidden = hide
+        if hide { close() }
+        panel.alphaValue = hide ? 0 : 1
+        updateClickThrough()
     }
 
     private func spaceChanged() {
         let front = NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
+        if let pinned {
+            // In its own Space it never left; just say whether that held.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if self.panel.occlusionState.contains(.visible) || self.screenHidden {
+                        log("space changed (front app: \(front)): overlay stayed put (pinned)")
+                    } else {
+                        log("space changed (front app: \(front)): pinned overlay not visible; pinning it again")
+                        pinned.pin(self.panel)
+                    }
+                }
+            }
+            return
+        }
         panel.orderFrontRegardless()
         // Visibility updates a beat after the switch; check then.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
@@ -241,8 +302,10 @@ final class NotchHostingView<Content: View>: NSHostingView<Content> {
     }
 
     private func place(followingCurrentSpace follow: Bool) {
+        let changed = follow != followingCurrentSpace
         followingCurrentSpace = follow
         panel.collectionBehavior = follow ? NotchPanel.followCurrentSpace : NotchPanel.onEverySpace
+        guard changed || pinned == nil else { return }
         panel.orderOut(nil)
         panel.orderFrontRegardless()
         model.reappear &+= 1          // the pill grows back out of the notch
