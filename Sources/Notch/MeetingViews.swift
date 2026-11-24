@@ -1,21 +1,33 @@
 import AppKit
 import SwiftUI
 
-/// The meeting's mark in the pill: a tile in its calendar's colour, with a camera when
-/// there's a call to join.
+/// The meeting's mark in the pill and the bubble: a frosted glass tile with a camera (a
+/// calendar page when there's no call to join) in the calendar's colour.
 struct MeetingGlyph: View {
     let meeting: Meeting
     let size: CGFloat
 
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-            .fill(meeting.color.color.gradient)
+        let tile = RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+        tile
+            .fill(LinearGradient(colors: [Color.white.opacity(0.19), Color.white.opacity(0.10)], startPoint: .top, endPoint: .bottom))
+            .overlay(tile.strokeBorder(Color.white.opacity(0.2), lineWidth: 0.6))
             .overlay {
                 MeetingIcon(video: meeting.joinURL != nil, filled: true)
                     .frame(width: size * 0.6, height: size * 0.6)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(meeting.color.readableOnDark)
             }
             .frame(width: size, height: size)
+    }
+}
+
+extension RGB {
+    /// The colour, lifted towards white if it's too dark to read on the dark glass.
+    var readableOnDark: Color {
+        let luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+        guard luminance < 0.42 else { return color }
+        let lift = min(0.6, (0.42 - luminance) * 1.6)
+        return Color(red: red + (1 - red) * lift, green: green + (1 - green) * lift, blue: blue + (1 - blue) * lift)
     }
 }
 
