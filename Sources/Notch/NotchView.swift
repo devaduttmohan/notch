@@ -224,7 +224,8 @@ struct NotchView: View {
         case .expanded:
             let kinds = model.pages.map(\.kind)
             let current = model.expandedActivity?.kind
-            let isListPage = current == .pullRequests || current == .builds || current == .load
+            let isListPage = current == .pullRequests || current == .builds || current == .load || current == .claudeBackground
+                || ([.claude, .claudeUpdates].contains(current) && !model.backgroundTasks.isEmpty)
             let wing = (spec.size.width - notch.width) / 2 - 18
             VStack(spacing: 0) {
                 // The camera row: free space either side of the camera holds the page switcher.
@@ -253,7 +254,8 @@ struct NotchView: View {
                 .padding(.horizontal, 18)
                 .frame(height: notch.height)
                 ExpandedContent(model: model, activity: model.expandedActivity,
-                                openPR: model.prSummary.flatMap(model.openPRRow), copyMenu: model.copyMenuPR, ns: ns)
+                                openPR: model.prSummary.flatMap(model.openPRRow), copyMenu: model.copyMenuPR,
+                                background: model.backgroundTasks, ns: ns)
                     .id(current)                          // a new page slides in, the old one out
                     .transition(PageTransition(step: model.pageStep))
                     .padding(.horizontal, 22)
@@ -445,6 +447,9 @@ private struct CompactLeading: View {
         case .claude, .claudeUpdate:
             ClaudeGlyph(size: 20)
                 .matchedGeometryEffect(id: "leading", in: ns)
+        case let .claudeBackground(tasks):
+            BackgroundMark(tasks: tasks)
+                .matchedGeometryEffect(id: "leading", in: ns)
         case let .pullRequests(summary):
             PRGlyph(summary: summary)
                 .matchedGeometryEffect(id: "leading", in: ns)
@@ -497,6 +502,8 @@ private struct CompactTrailing: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 14))
                 .foregroundStyle(.green)
+        case let .claudeBackground(tasks):
+            BackgroundTime(tasks: tasks)
         case nil:
             EmptyView()
         }
@@ -510,6 +517,7 @@ private struct ExpandedContent: View {
     let activity: Activity?
     let openPR: String?            // an input, so opening a row redraws this (the model alone doesn't)
     var copyMenu: String? = nil    // the same for a row's Copy ▾ list
+    var background: [BackgroundTask] = []   // the same for Claude's background work under its page
     let ns: Namespace.ID
 
     var body: some View {
@@ -519,11 +527,13 @@ private struct ExpandedContent: View {
         case let .nowPlaying(nowPlaying):
             NowPlayingExpanded(model: model, nowPlaying: nowPlaying, ns: ns)
         case let .claude(wait):
-            ClaudeExpanded(title: "Claude needs you", message: wait.message, project: wait.project,
-                           since: wait.since, others: model.claudeWaits.count - 1, finished: false, ns: ns,
-                           host: wait.host, open: { model.openClaudeSession?(wait.sessionID) }) {
+            claudePage(ClaudeExpanded(title: "Claude needs you", message: wait.message, project: wait.project,
+                                      since: wait.since, others: model.claudeWaits.count - 1, finished: false, ns: ns,
+                                      host: wait.host, open: { model.openClaudeSession?(wait.sessionID) }) {
                 model.dismissClaude()
-            }
+            })
+        case let .claudeBackground(tasks):
+            ClaudePage(tasks: tasks, measured: measureClaude) { EmptyView() }
         case let .pullRequests(summary):
             PRsExpanded(summary: summary, open: openPR, toggle: { model.togglePR($0) },
                         copyMenu: copyMenu, toggleCopy: { model.copyMenuPR = $0 },
@@ -545,18 +555,31 @@ private struct ExpandedContent: View {
         case let .process(process):
             ProcessExpanded(process: process, ns: ns) { action in model.processAction?(action, process) }
         case let .claudeUpdate(update):
-            ClaudeExpanded(title: update.headline, message: update.message, project: update.project,
-                           since: update.since, others: model.claudeUpdates.count - 1,
-                           finished: update.kind == .finished, ns: ns, host: update.host,
-                           open: update.sessions.count == 1 ? {
-                               model.openClaudeSession?(update.sessions[0])
-                               model.openedClaudeSession(update.sessions[0])
-                           } : nil) {
+            claudePage(ClaudeExpanded(title: update.headline, message: update.message, project: update.project,
+                                      since: update.since, others: model.claudeUpdates.count - 1,
+                                      finished: update.kind == .finished, ns: ns, host: update.host,
+                                      open: update.sessions.count == 1 ? {
+                                          model.openClaudeSession?(update.sessions[0])
+                                          model.openedClaudeSession(update.sessions[0])
+                                      } : nil) {
                 model.clearClaudeUpdates()
-            }
+            })
         case nil:
             HomeExpanded(model: model)
         }
+    }
+
+    /// A Claude page, with the background work underneath while there is some.
+    @ViewBuilder private func claudePage(_ page: some View) -> some View {
+        if background.isEmpty {
+            page
+        } else {
+            ClaudePage(tasks: background, measured: measureClaude) { page }
+        }
+    }
+
+    private func measureClaude(_ height: CGFloat) {
+        if abs(model.claudeContentHeight - height) > 0.5 { model.claudeContentHeight = height }
     }
 }
 

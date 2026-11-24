@@ -64,10 +64,19 @@ import AppKit
             lastWorking[session] = now
             model.claudeResumed(session: session)
             keepAwake?.claudeWorking(session: session, project: project)
+            // Started something in the background: it shows, with its time from now.
+            if let start = hook["background_start"] as? [String: Any],
+               let task = Self.backgroundTask(start, session: session, project: project, started: now) {
+                model.backgroundStarted(task)
+            }
         case "Stop":
             lastWorking[session] = nil
             model.claudeResumed(session: session)
             keepAwake?.claudeIdle(session: session)
+            // What's still running in the background (from Claude Code 2.1.3xx; older ones send none).
+            if let tasks = hook["background_tasks"] as? [[String: Any]] {
+                model.backgroundRunning(session: session, tasks.compactMap { Self.backgroundTask($0, session: session, project: project) })
+            }
             let took = turnStarted.removeValue(forKey: session).map { now.timeIntervalSince($0) }
             if let took, took < Self.quietTurn {
                 return log("claude: \(project) finished in \(CommandAlerts.duration(took)) (quiet)")
@@ -81,6 +90,7 @@ import AppKit
         case "SessionEnd":
             turnStarted[session] = nil
             lastWorking[session] = nil
+            model.backgroundEnded(session: session)
             model.claudeResumed(session: session)
             keepAwake?.claudeIdle(session: session)
             let reason = hook["reason"] as? String ?? "other"
@@ -129,6 +139,19 @@ import AppKit
                                             headline: "\(ended.count) Claude sessions ended", project: nil,
                                             message: projects.joined(separator: ", ")))
         }
+    }
+
+    /// A background task from a hook's entry: one that's still in flight (an entry that says it
+    /// has ended doesn't count), named by its description.
+    nonisolated static func backgroundTask(_ entry: [String: Any], session: String, project: String,
+                                           started: Date? = nil) -> BackgroundTask? {
+        guard let id = entry["id"] as? String, !id.isEmpty else { return nil }
+        let status = (entry["status"] as? String ?? "").lowercased()
+        guard !["completed", "failed", "killed", "stopped", "cancelled", "canceled", "done", "error"].contains(status) else { return nil }
+        let kind = entry["type"] as? String ?? ""
+        let description = (entry["description"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = description.isEmpty ? (kind == "shell" ? "A background command" : "Background work") : description
+        return BackgroundTask(id: id, session: session, kind: kind, title: title, project: project, started: started)
     }
 
     /// The working folder's name ("~" for your home folder).

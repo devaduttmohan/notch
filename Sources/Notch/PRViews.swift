@@ -113,6 +113,8 @@ struct BubbleGlyph: View {
                 }
             case .claude:
                 PulsingDot(color: .claude)
+            case let .claudeBackground(tasks):
+                BackgroundMark(tasks: Array(tasks.prefix(1)), size: 17)   // the bubble counts what else is up itself
             case let .process(process):
                 ProcessGlyph(process: process, size: 18)
             case .claudeUpdate, .home:

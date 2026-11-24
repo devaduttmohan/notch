@@ -743,7 +743,7 @@ struct ModulesPane: View {
             ModuleCard(symbol: MeetingIcon.calendarName + ".fill", color: Color(red: 1, green: 0.3, blue: 0.25), title: "Meetings",
                        detail: "Countdown to your next meeting, and Join.", isOn: $store.value.meetings)
             ModuleCard(symbol: "sparkle", color: .claude, title: "Claude Code",
-                       detail: "Needs you, finished, session ended.", isOn: $store.value.claude)
+                       detail: "Needs you, finished, background tasks.", isOn: $store.value.claude)
             ModuleCard(symbol: "terminal.fill", color: Color(white: 0.4), title: "Command alerts",
                        detail: "notchctl say and notchctl run.", isOn: $store.value.commands)
             ModuleCard(symbol: "timer", color: .orange, title: "Timers",

@@ -201,7 +201,7 @@ extension NotchModel {
         switch activity {
         case .nowPlaying: return artworkTint?.color ?? .teal
         case .timer: return .orange
-        case .claude, .claudeUpdate: return .claude
+        case .claude, .claudeUpdate, .claudeBackground: return .claude
         case .meeting(let meeting): return meeting.color.color
         case .process: return .orange
         case .pullRequests(let summary): return summary.needsYou ? .red : .prGreen

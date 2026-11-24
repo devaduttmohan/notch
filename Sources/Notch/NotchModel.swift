@@ -137,6 +137,29 @@ struct ClaudeUpdate: Equatable, Identifiable {
     }
 }
 
+/// Claude Code work running in the background: a command, an agent, a watch… Its start comes
+/// from the tool call that launched it; Claude Code's list at the end of each turn says what's
+/// still running, and one that's left the list has finished (Claude Code doesn't say how).
+struct BackgroundTask: Equatable, Identifiable {
+    var id: String                  // Claude Code's task id
+    var session: String
+    var kind: String                // "shell", "subagent", "monitor", "workflow", …
+    var title: String               // its description
+    var project: String
+    var started: Date?              // nil: first seen already running, so how long is unknown
+
+    /// For the line under its name.
+    var kindName: String {
+        switch kind {
+        case "shell": "command"
+        case "subagent": "agent"
+        case "monitor": "watching"
+        case "": "task"
+        default: kind
+        }
+    }
+}
+
 /// A calendar event worth showing: about to start, or under way.
 struct Meeting: Equatable, Identifiable {
     var id: String
@@ -198,6 +221,7 @@ extension Activity {
         switch self {
         case .claude: .claude
         case .claudeUpdate: .claudeUpdates
+        case .claudeBackground: .claudeBackground
         case .meeting: .meeting
         case .process: .process
         case .nowPlaying: .music
@@ -241,11 +265,11 @@ enum PRAction {
 
 /// The kinds of thing the island shows; the open island has a page for each one that's live.
 enum ActivityKind: Hashable {
-    case claude, claudeUpdates, meeting, process, music, timer, pullRequests, builds, load, home
+    case claude, claudeUpdates, claudeBackground, meeting, process, music, timer, pullRequests, builds, load, home
 
     var symbol: String {
         switch self {
-        case .claude, .claudeUpdates: "sparkle"
+        case .claude, .claudeUpdates, .claudeBackground: "sparkle"
         case .meeting: MeetingIcon.calendarName
         case .process: "flame.fill"
         case .music: "music.note"
@@ -259,7 +283,7 @@ enum ActivityKind: Hashable {
     var title: String {
         switch self {
         case .claude: "Claude"
-        case .claudeUpdates: "Claude"
+        case .claudeUpdates, .claudeBackground: "Claude"
         case .meeting: "Meeting"
         case .process: "Process"
         case .music: "Music"
@@ -276,6 +300,7 @@ enum ActivityKind: Hashable {
 enum Activity: Equatable {
     case claude(ClaudeWait)
     case claudeUpdate(ClaudeUpdate)
+    case claudeBackground([BackgroundTask])
     case meeting(Meeting)
     case process(RunawayProcess)
     case pullRequests(PRSummary)
@@ -379,6 +404,8 @@ enum Activity: Equatable {
     @Published private(set) var prUpdates: [PRUpdate] = [] {
         didSet { refreshStickyClock() }
     }
+    /// Claude Code's background work, running now, in the order it started.
+    @Published private(set) var backgroundTasks: [BackgroundTask] = []
     /// Build and command alerts set to stay until seen, newest first.
     @Published private(set) var notices: [Notice] = [] {
         didSet { refreshStickyClock() }
@@ -429,7 +456,7 @@ enum Activity: Equatable {
             layout.size = new.size
             layout.roundness = new.roundness
         }
-        if !new.claude { claudeWaits.removeAll(); claudeUpdates.removeAll() }
+        if !new.claude { claudeWaits.removeAll(); claudeUpdates.removeAll(); backgroundTasks.removeAll() }
         if !new.timers { timer = nil }
         if !new.meetings { meeting = nil }
         if !new.systemHealth { runaway = nil }
@@ -512,6 +539,7 @@ enum Activity: Equatable {
         if let meeting, !meeting.prominent { list.append(.meeting(meeting)) }
         if let timer { list.append(.timer(timer)) }
         if let builds, builds.live, settings.builds { list.append(.builds(builds)) }
+        if !backgroundTasks.isEmpty, settings.claude { list.append(.claudeBackground(backgroundTasks)) }
         if let prSummary, prSummary.live, settings.pullRequests { list.append(.pullRequests(prSummary)) }
         if let load = loadInPill, !load.pressing { list.append(.load(load)) }  // calm ("Always"), or memory only elevated
         if let nowPlaying, !nowPlaying.isPlaying { list.append(.nowPlaying(nowPlaying)) }
@@ -577,7 +605,11 @@ enum Activity: Equatable {
             news.append((!notice.hidden, notice.since, .builds(builds)))
         }
         list += news.sorted { $0.onNotch != $1.onNotch ? $0.onNotch : $0.since > $1.since }.map(\.page)
-        list += priorityActivities.filter { activity in activity.kind != .claude && !list.contains { $0.kind == activity.kind } }
+        list += priorityActivities.filter { activity in
+            activity.kind != .claude && !list.contains { $0.kind == activity.kind }
+                // Background work shows under Claude's page when there is one.
+                && !(activity.kind == .claudeBackground && list.contains { [.claude, .claudeUpdates].contains($0.kind) })
+        }
         // A section you chose that isn't live on its own still gets its tab. Not PRs or builds:
         // they always have theirs, in a fixed place below, so choosing one (which pins it)
         // never swaps them round.
@@ -620,6 +652,8 @@ enum Activity: Equatable {
     @Published var prContentHeight: CGFloat = 0
     /// The same for the CPU & memory page.
     @Published var loadContentHeight: CGFloat = 0
+    /// The same for Claude's page while background work is listed on it.
+    @Published var claudeContentHeight: CGFloat = 0
 
     /// The PR row that's open on the PR page. Until you choose, the newest PR with news.
     @Published private(set) var openPR: String?
@@ -686,6 +720,10 @@ enum Activity: Equatable {
         case .load:
             guard loadContentHeight > 0 else { return .list }
             return .listFit((loadContentHeight + layout.geometry.notchSize.height + 16).rounded(.up))
+        case .claude, .claudeUpdate, .claudeBackground:
+            // Claude's page grows to fit the background work listed on it.
+            guard !backgroundTasks.isEmpty, settings.claude, claudeContentHeight > 0 else { return .standard }
+            return .listFit((claudeContentHeight + layout.geometry.notchSize.height + 16).rounded(.up))
         default: return .standard
         }
     }
@@ -996,6 +1034,42 @@ enum Activity: Equatable {
         }
     }
 
+    // MARK: Claude's background work
+
+    /// A task launched in the background (from its tool call): it shows with its time from now.
+    func backgroundStarted(_ task: BackgroundTask) {
+        guard settings.claude, !backgroundTasks.contains(where: { $0.id == task.id }) else { return }
+        if !quiet { log("claude: \(task.project) started \"\(task.title)\" in the background (\(task.kindName))") }
+        backgroundTasks.append(task)
+        if backgroundTasks.count > 30 { backgroundTasks.removeFirst(backgroundTasks.count - 30) }
+    }
+
+    /// A session's list at the end of a turn: what's on it is running (keeping the times already
+    /// known); what of that session's isn't has finished.
+    func backgroundRunning(session: String, _ tasks: [BackgroundTask]) {
+        guard settings.claude else { return }
+        let listed = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var next: [BackgroundTask] = backgroundTasks.compactMap { known in
+            guard known.session == session else { return known }
+            guard var still = listed[known.id] else { return nil }
+            still.started = known.started ?? still.started
+            return still
+        }
+        for task in tasks where !next.contains(where: { $0.id == task.id }) { next.append(task) }
+        if next.count > 30 { next.removeFirst(next.count - 30) }
+        if !quiet {
+            for gone in backgroundTasks where gone.session == session && listed[gone.id] == nil {
+                log("claude: \(gone.project) background \"\(gone.title)\" finished")
+            }
+        }
+        if next != backgroundTasks { backgroundTasks = next }
+    }
+
+    /// A session ended: its background work went with it.
+    func backgroundEnded(session: String) {
+        if backgroundTasks.contains(where: { $0.session == session }) { backgroundTasks.removeAll { $0.session == session } }
+    }
+
     /// Jumped to a session from its update: that update is read.
     func openedClaudeSession(_ session: String) {
         claudeUpdates.removeAll { $0.sessions.contains(session) }
@@ -1149,6 +1223,7 @@ enum Activity: Equatable {
         claudeUpdates.removeAll()
         prUpdates.removeAll()
         notices.removeAll()
+        backgroundTasks.removeAll()
     }
 
     /// For the log: how long a piece of news stays on the notch.
