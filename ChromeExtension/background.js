@@ -103,6 +103,7 @@ function clean(state) {
     title: text(state.title),
     artist: text(state.artist),
     artwork: artwork.startsWith('https://') ? artwork : '',
+    kind: state.kind === 'video' ? 'video' : 'audio',
     isPlaying: state.isPlaying === true,
     canSkip: state.canSkip === true,
     canSeek: state.canSeek === true && duration > 0,

@@ -2,7 +2,7 @@
 // Runs in the extension's isolated world, which can use chrome.runtime. Wrapped in a
 // function so it can be injected again after the extension reloads without clashing.
 (() => {
-  const VERSION = 4; // must match page.js: only that version's messages are relayed
+  const VERSION = 5; // must match page.js: only that version's messages are relayed
   const TAG = `__notchNowPlaying:v${VERSION}`;
   let reported = false;
 

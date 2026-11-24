@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Notch Now Playing",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Shows what's playing in Chrome in the Notch app on this Mac.",
   "minimum_chrome_version": "116",
   "permissions": ["scripting"],

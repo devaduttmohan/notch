@@ -7,7 +7,7 @@
   // was updated. The message tag carries the version, so an old copy can neither hear
   // commands meant for this one nor have its reports relayed. Bump VERSION (here and in
   // content.js) whenever the two scripts change together.
-  const VERSION = 4;
+  const VERSION = 5;
   const TAG = `__notchNowPlaying:v${VERSION}`;
   if ((window.__notchNowPlayingVersion || 0) >= VERSION) return; // this or a newer copy is running
   window.__notchNowPlayingVersion = VERSION;
@@ -105,6 +105,33 @@
     try { return new URL(list[0].src, location.href).href; } catch { return ''; }
   }
 
+  // Many video sites set no Media Session artwork. Then the video's own poster stands in, or
+  // the page's share image (what a link preview shows: usually the show or episode still).
+  // Videos only: on a music or radio page the share image is often just the site's logo.
+  const SHARE_IMAGES = ['meta[property="og:image:secure_url"]', 'meta[property="og:image"]', 'meta[name="og:image"]',
+    'meta[name="twitter:image"]', 'meta[property="twitter:image"]', 'meta[name="twitter:image:src"]'];
+
+  function pageArtwork(el) {
+    const found = [];
+    if (el && el.tagName === 'VIDEO' && el.poster) found.push(el.poster);
+    for (const selector of SHARE_IMAGES) {
+      const content = document.querySelector(selector)?.getAttribute('content');
+      if (content) found.push(content);
+    }
+    for (const src of found) {
+      try {
+        const url = new URL(src, location.href);
+        if (url.protocol === 'https:') return url.href;
+      } catch { /* not a URL */ }
+    }
+    return '';
+  }
+
+  // A video with a picture (not a <video> element playing sound only).
+  function isVideo(el) {
+    return !!el && el.tagName === 'VIDEO' && el.videoWidth > 0;
+  }
+
   // The site's own player buttons, found by their accessibility label. Used when we never
   // saw its Media Session handlers (this script arrived after the site set them up).
   // Exact names only (with an optional shortcut hint like "Next (SHIFT+n)"), so links such
@@ -178,7 +205,8 @@
     return {
       title: (meta && meta.title) || document.title,
       artist: (meta && meta.artist) || '',
-      artwork: bestArtwork(meta),
+      artwork: bestArtwork(meta) || (isVideo(el) ? pageArtwork(el) : ''),
+      kind: isVideo(el) ? 'video' : 'audio',
       isPlaying,
       canSkip: handlers.has('nexttrack') || handlers.has('previoustrack')
         || !!findControl('nexttrack') || !!findControl('previoustrack'),
@@ -200,7 +228,7 @@
     const state = snapshot();
     const now = performance.now();
     const key = state
-      ? JSON.stringify([state.title, state.artist, state.artwork, state.isPlaying, state.canSkip,
+      ? JSON.stringify([state.title, state.artist, state.artwork, state.kind, state.isPlaying, state.canSkip,
         state.canSeek, Math.round(state.duration), state.rate])
       : 'null';
     let due = force || key !== lastKey;
