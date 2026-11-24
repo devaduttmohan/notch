@@ -235,7 +235,9 @@ struct NotchView: View {
                                 withAnimation(Motion.animation(Motion.contentSwap)) { model.select(page: kind) }
                             }
                         } else {
-                            PageDots(count: kinds.count, index: current.flatMap { kinds.firstIndex(of: $0) } ?? 0)
+                            PageDots(pages: kinds, current: current) { kind in
+                                withAnimation(Motion.animation(Motion.contentSwap)) { model.select(page: kind) }
+                            }
                         }
                     }
                     Spacer(minLength: notch.width + 8)
@@ -350,19 +352,67 @@ private struct PageTransition: Transition {
 }
 
 /// Page dots, when there are more pages than fit as tabs.
-private struct PageDots: View {
-    let count: Int
-    let index: Int
+/// When the tabs don't fit beside the camera: a dot per page, the current one long. Point at
+/// a dot and it opens up on a spring into a small capsule with that page's icon (its
+/// neighbours glide aside); click it to go there. Two-finger swipes still turn the pages.
+struct PageDots: View {
+    let pages: [ActivityKind]
+    let current: ActivityKind?
+    let select: (ActivityKind) -> Void
+    private let hovered: State<ActivityKind?>
+    private let leaving = State<ActivityKind?>(initialValue: nil)
+
+    /// `previewHover`: start with that dot open (for previews).
+    init(pages: [ActivityKind], current: ActivityKind?, previewHover: ActivityKind? = nil, select: @escaping (ActivityKind) -> Void) {
+        self.pages = pages
+        self.current = current
+        self.select = select
+        hovered = State(initialValue: previewHover)
+    }
 
     var body: some View {
-        HStack(spacing: 5) {
-            ForEach(0..<count, id: \.self) { i in
-                Capsule()
-                    .fill(Color.white.opacity(i == index ? 0.9 : 0.3))
-                    .frame(width: i == index ? 14 : 6, height: 6)
+        HStack(spacing: 0) {
+            ForEach(pages, id: \.self) { kind in
+                let isCurrent = kind == current
+                let open = hovered.wrappedValue == kind
+                let width: CGFloat = open ? 24 : isCurrent ? 14 : 6
+                ZStack {
+                    Capsule().fill(Color.white.opacity(open ? 0.16 : isCurrent ? 0.9 : 0.3))
+                    if open {
+                        SymbolImage(kind.symbol, size: 10.5, weight: .bold)
+                            .foregroundStyle(Color.white.opacity(isCurrent ? 1 : 0.88))
+                            .transition(.scale(scale: 0.5).combined(with: .opacity))
+                    }
+                }
+                .frame(width: width, height: open ? 20 : 6)
+                // Each dot owns the gap beside it, so the small ones are easy to point at.
+                .frame(width: width + 6, height: 20)
+                .contentShape(Rectangle())
+                .onHover { inside in point(at: kind, inside) }
+                .onTapGesture { select(kind) }
+                .accessibilityLabel(kind.title)
+                .accessibilityAddTraits(isCurrent ? [.isButton, .isSelected] : .isButton)
             }
         }
-        .animation(UISpring.snap, value: index)
+        .animation(.spring(Spring(duration: 0.34, bounce: 0.24)), value: hovered.wrappedValue)
+        .animation(UISpring.snap, value: current)
+    }
+
+    /// Onto a dot: open it. Off it: close a beat later, unless the pointer has already moved
+    /// to the next dot (no flicker while sliding along them).
+    private func point(at kind: ActivityKind, _ inside: Bool) {
+        if inside {
+            leaving.wrappedValue = nil
+            hovered.wrappedValue = kind
+        } else if hovered.wrappedValue == kind {
+            leaving.wrappedValue = kind
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                if leaving.wrappedValue == kind, hovered.wrappedValue == kind {
+                    hovered.wrappedValue = nil
+                    leaving.wrappedValue = nil
+                }
+            }
+        }
     }
 }
 
