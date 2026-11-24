@@ -99,6 +99,8 @@ struct BubbleGlyph: View {
                 } else {
                     PRGlyph(summary: summary, size: 17)
                 }
+            case let .builds(summary):
+                BuildMark(summary: summary, size: 17)
             case let .meeting(meeting):
                 MeetingGlyph(meeting: meeting, size: 18)
             case let .timer(timer):

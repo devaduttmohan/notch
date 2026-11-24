@@ -199,6 +199,7 @@ extension Activity {
         case .nowPlaying: .music
         case .timer: .timer
         case .pullRequests: .pullRequests
+        case .builds: .builds
         case .home: .home
         }
     }
@@ -220,7 +221,7 @@ enum PRAction {
 
 /// The kinds of thing the island shows; the open island has a page for each one that's live.
 enum ActivityKind: Hashable {
-    case claude, claudeUpdates, meeting, process, music, timer, pullRequests, home
+    case claude, claudeUpdates, meeting, process, music, timer, pullRequests, builds, home
 
     var symbol: String {
         switch self {
@@ -230,6 +231,7 @@ enum ActivityKind: Hashable {
         case .music: "music.note"
         case .timer: "timer"
         case .pullRequests: PullRequestIcon.symbolName
+        case .builds: "hammer.fill"
         case .home: "clock"
         }
     }
@@ -242,6 +244,7 @@ enum ActivityKind: Hashable {
         case .music: "Music"
         case .timer: "Timer"
         case .pullRequests: "Pull requests"
+        case .builds: "Builds"
         case .home: "Now"
         }
     }
@@ -254,6 +257,7 @@ enum Activity: Equatable {
     case meeting(Meeting)
     case process(RunawayProcess)
     case pullRequests(PRSummary)
+    case builds(BuildSummary)
     case home
     case timer(TimerInfo)
     case nowPlaying(NowPlaying)
@@ -272,6 +276,13 @@ enum Activity: Equatable {
     @Published var awake = AwakeState()
     /// Your pull requests (from `PRWatcher`).
     @Published var prSummary: PRSummary?
+    /// Your Jenkins builds (from `JenkinsWatcher`).
+    @Published var builds: BuildSummary?
+    /// The Jenkins server, for the builds page's link.
+    var jenkinsServer: URL?
+    /// Set by the app: open a build's console (or Jenkins), and "you've seen the builds page".
+    var buildAction: ((URL) -> Void)?
+    var buildsSeen: (() -> Void)?
     /// The page the open island shows (nil: the most important one).
     @Published var page: ActivityKind? {
         didSet { trackVisibility() }
@@ -333,6 +344,7 @@ enum Activity: Equatable {
     private var updatesShownAt: Date?
     private var updatesRead = false
     private var prsShownAt: Date?
+    private var buildsShownAt: Date?
     private var prUpdatesRead = false
     private var artworkTintKey: String?
     private var settingsWatch: AnyCancellable?
@@ -359,6 +371,10 @@ enum Activity: Equatable {
         if !new.pullRequests {
             prUpdates.removeAll()
             if pinned == .pullRequests { pinned = nil }
+        }
+        if !new.builds {
+            builds = nil
+            if pinned == .builds { pinned = nil }
         }
     }
 
@@ -387,6 +403,9 @@ enum Activity: Equatable {
            !list.contains(where: { $0.kind == .pullRequests }) {
             list.append(.pullRequests(prSummary))
         }
+        if pinned == .builds, settings.builds, let builds, !builds.all.isEmpty, !list.contains(where: { $0.kind == .builds }) {
+            list.append(.builds(builds))
+        }
         // The section you chose leads, after anything that needs you right now.
         if let pinned, let index = list.firstIndex(where: { $0.kind == pinned }) {
             let chosen = list.remove(at: index)
@@ -406,6 +425,7 @@ enum Activity: Equatable {
         if let nowPlaying, nowPlaying.isPlaying { list.append(.nowPlaying(nowPlaying)) }
         if let meeting, !meeting.prominent { list.append(.meeting(meeting)) }
         if let timer { list.append(.timer(timer)) }
+        if let builds, builds.live, settings.builds { list.append(.builds(builds)) }
         if let prSummary, prSummary.live, settings.pullRequests { list.append(.pullRequests(prSummary)) }
         if let nowPlaying, !nowPlaying.isPlaying { list.append(.nowPlaying(nowPlaying)) }
         return list
@@ -421,7 +441,7 @@ enum Activity: Equatable {
     }
 
     /// Sections the closed island can be pinned to.
-    static let pinnable: Set<ActivityKind> = [.music, .pullRequests, .meeting, .timer, .process]
+    static let pinnable: Set<ActivityKind> = [.music, .pullRequests, .builds, .meeting, .timer, .process]
 
     /// The bubble beside the pill: the next most important thing that's actually happening.
     /// Paused music never takes it (a lone ▶ beside your PRs is noise); it keeps its tab in
@@ -451,13 +471,19 @@ enum Activity: Equatable {
         if let update = prUpdates.first, let prSummary { news.append((update.since, .pullRequests(prSummary))) }
         list += news.sorted { $0.0 > $1.0 }.map(\.1)
         list += priorityActivities.filter { activity in activity.kind != .claude && !list.contains { $0.kind == activity.kind } }
-        // A section you chose that isn't live on its own (quiet PRs) still gets its tab.
-        if let chosen = liveActivities.first(where: { $0.kind == pinned }), !list.contains(where: { $0.kind == chosen.kind }) {
+        // A section you chose that isn't live on its own still gets its tab. Not PRs or builds:
+        // they always have theirs, in a fixed place below, so choosing one (which pins it)
+        // never swaps them round.
+        if let chosen = liveActivities.first(where: { $0.kind == pinned }), ![.pullRequests, .builds].contains(chosen.kind),
+           !list.contains(where: { $0.kind == chosen.kind }) {
             list.append(chosen)
         }
         if list.isEmpty { list.append(.home) }
         if let prSummary, settings.pullRequests, !prSummary.prs.isEmpty, !list.contains(where: { $0.kind == .pullRequests }) {
             list.append(.pullRequests(prSummary))
+        }
+        if let builds, settings.builds, !builds.all.isEmpty, !list.contains(where: { $0.kind == .builds }) {
+            list.append(.builds(builds))
         }
         return list
     }
@@ -524,6 +550,15 @@ enum Activity: Equatable {
             // dropping a row out of sight), shorter when there are only a few.
             guard prContentHeight > 0 else { return .list }
             return .listFit((prContentHeight + layout.geometry.notchSize.height + 16).rounded(.up))   // + camera row, padding
+        case .builds(let summary):
+            // Sized to its rows (up to three): a header, each row, and its bar (stages for a
+            // pipeline, time for anything else that's running).
+            let rows = summary.all.prefix(3).reduce(CGFloat(20)) { height, build in
+                let running = build.building && !build.queued
+                let bar: CGFloat = running || !build.stages.isEmpty ? 12 : 0
+                return height + 44 + bar + (running && !build.stages.isEmpty ? 18 : 0)   // + the stage line under a running pipeline
+            }
+            return .listFit((rows + layout.geometry.notchSize.height + 16).rounded(.up))
         default: return .standard
         }
     }
@@ -542,6 +577,11 @@ enum Activity: Equatable {
         else if let since = prsShownAt {
             if now.timeIntervalSince(since) >= 0.5 { prsSeen?(); prUpdatesRead = true }
             prsShownAt = nil
+        }
+        if shown == .builds { buildsShownAt = buildsShownAt ?? now }
+        else if let since = buildsShownAt {
+            if now.timeIntervalSince(since) >= 0.5 { buildsSeen?() }
+            buildsShownAt = nil
         }
     }
 

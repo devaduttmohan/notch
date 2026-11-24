@@ -224,6 +224,7 @@ struct NotchView: View {
         case .expanded:
             let kinds = model.pages.map(\.kind)
             let current = model.expandedActivity?.kind
+            let isListPage = current == .pullRequests || current == .builds
             let wing = (spec.size.width - notch.width) / 2 - 18
             VStack(spacing: 0) {
                 // The camera row: free space either side of the camera holds the page switcher.
@@ -254,11 +255,11 @@ struct NotchView: View {
                     .id(current)                          // a new page slides in, the old one out
                     .transition(PageTransition(step: model.pageStep))
                     .padding(.horizontal, 22)
-                    .padding(.top, model.expandedActivity?.kind == .pullRequests ? 2 : 12)
+                    .padding(.top, isListPage ? 2 : 12)
                     .padding(.bottom, 12)
-                    // Centred below the camera row; a list (the PR page) hangs from the top, so it
+                    // Centred below the camera row; a list (PRs, builds) hangs from the top, so it
                     // stays put while the island grows or shrinks around it.
-                    .frame(maxHeight: .infinity, alignment: model.expandedActivity?.kind == .pullRequests ? .top : .center)
+                    .frame(maxHeight: .infinity, alignment: isListPage ? .top : .center)
             }
             .frame(width: spec.size.width, height: spec.size.height, alignment: .top)   // pinned to the top, always
             .animation(Motion.animation(Motion.contentSwap), value: model.expandedActivity)
@@ -394,6 +395,9 @@ private struct CompactLeading: View {
         case let .pullRequests(summary):
             PRGlyph(summary: summary)
                 .matchedGeometryEffect(id: "leading", in: ns)
+        case let .builds(summary):
+            BuildMark(summary: summary)
+                .matchedGeometryEffect(id: "leading", in: ns)
         case .home:
             EmptyView()
         case nil:
@@ -424,6 +428,8 @@ private struct CompactTrailing: View {
             ProcessLoad(process: process)
         case let .pullRequests(summary):
             PRProgress(summary: summary)
+        case let .builds(summary):
+            BuildProgress(summary: summary)
         case .home:
             EmptyView()
         case let .nowPlaying(nowPlaying):
@@ -467,6 +473,8 @@ private struct ExpandedContent: View {
                         }) { action in
                 model.prAction?(action)
             }
+        case let .builds(summary):
+            BuildsExpanded(summary: summary, server: model.jenkinsServer) { model.buildAction?($0) }
         case .home:
             HomeExpanded(model: model)
         case let .meeting(meeting):

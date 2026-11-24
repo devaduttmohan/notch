@@ -445,6 +445,8 @@ enum PRDiff {
     private var lowBudgetLogged = false
 
     var onEvents: (([PREvent]) -> Void)?
+    /// A new commit on one of your own PRs (you pushed): builds may be starting.
+    var onPush: (() -> Void)?
     /// After every look (and when things are marked seen): rebuild what the island shows.
     var onChange: (() -> Void)?
 
@@ -579,6 +581,7 @@ enum PRDiff {
         }
         pulses = parsed.pulses
         countsOnly = countsOnly.filter { parsed.pulses[$0.key] != nil }
+        if reasons.contains(where: { $0.value == "new commit" && parsed.pulses[$0.key]?.waitingOnMe == false }) { onPush?() }
         let ids = parsed.order.filter { reasons[$0] != nil && $0.range(of: "^[A-Za-z0-9_=-]+$", options: .regularExpression) != nil }
         guard !ids.isEmpty else { return finish(login: parsed.login, order: parsed.order, details: [:]) }
         let why = reasons

@@ -173,6 +173,7 @@ extension NotchModel {
         case .meeting(let meeting): return meeting.color.color
         case .process: return .orange
         case .pullRequests(let summary): return summary.needsYou ? .red : .prGreen
+        case .builds(let summary): return summary.running.isEmpty && summary.unseenFailure ? .red : .buildBlue
         case .home, nil: return Color(red: 0.36, green: 0.42, blue: 1)
         }
     }
