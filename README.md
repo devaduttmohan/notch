@@ -356,6 +356,14 @@ PostToolUse and SessionEnd:
   (read from the session transcript). Turns under 15 s finish quietly.
 - *SessionEnd*: **Session ended · project** with how long it ran. Sessions ending
   together (quitting the app) share one; `/clear` and resume stay quiet.
+- *Background work* (commands, agents, watches Claude runs in the background): the
+  pill shows a turning ring around Claude's mark, "+2" for the rest, and how long the
+  oldest has run; the open island lists them under Claude's page ("3 running in the
+  background"), each with its project, kind and time so far. A start comes from the
+  tool call (PostToolUse); each turn's end (Stop's `background_tasks`) says what's
+  still running, and one that's gone has finished. Claude Code reports no progress,
+  estimate or exit code for them, so the ring only turns, and a finished one simply
+  leaves. Needs `notchctl` from this version (it forwards those fields).
 - Finished / ended updates **stay on the notch until you look**: hover it (it opens
   with the details) and move away, or press **Dismiss**. A brush past under half a
   second doesn't count. Several waiting show a count; a passing banner (charging, a
