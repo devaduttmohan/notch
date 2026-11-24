@@ -20,6 +20,8 @@ import AppKit
     var keepAwake: KeepAwake?
     /// Where each session lives (its app, tab, folder), for "Open in …".
     private var hosts: [String: SessionHost] = [:]
+    /// Where a session lives, as far as Notch knows (for tests and the log).
+    func host(for session: String) -> SessionHost? { hosts[session] }
     private var turnStarted: [String: Date] = [:]
     /// When each session last showed signs of working (a prompt, a tool finishing).
     private var lastWorking: [String: Date] = [:]
@@ -32,15 +34,18 @@ import AppKit
         self.model = model
     }
 
-    func handle(_ hook: [String: Any], ancestors: [Int] = []) {
+    func handle(_ hook: [String: Any], ancestors: [Int] = [], appSession: String? = nil) {
         let event = hook["hook_event_name"] as? String ?? ""
         let session = hook["session_id"] as? String ?? "unknown"
         let project = Self.projectName(hook["cwd"] as? String)
         let now = Date()
         if hosts[session] == nil, !ancestors.isEmpty,
-           let host = SessionHost.resolve(ancestors: ancestors, folder: hook["cwd"] as? String) {
+           let host = SessionHost.resolve(ancestors: ancestors, folder: hook["cwd"] as? String, appSession: appSession) {
             hosts[session] = host
-            log("claude: \(project) runs in \(host.name)" + (host.tty.map { " (\($0))" } ?? ""))
+            log("claude: \(project) runs in \(host.name)" + (host.tty.map { " (\($0))" } ?? "")
+                + (appSession != nil ? " (its own session link)" : ""))
+        } else if let appSession, hosts[session] != nil, hosts[session]?.appSession != appSession {
+            hosts[session]?.appSession = appSession     // known from before this build: learns the link now
         }
         let host = hosts[session]?.name
         switch event {

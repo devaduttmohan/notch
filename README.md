@@ -115,9 +115,11 @@ Matching ignores case.
 ## Open in …
 
 `notchctl claude` sends the processes above the hook, so Notch knows where each session
-runs. **Open in …** on a Claude update or "needs you": Terminal and iTerm select the exact
-tab; VS Code, Cursor and Antigravity focus the project's window; Claude and Warp come to the
-front (neither has a supported way to open one specific session from outside).
+runs, and, for a session the Claude app started, the app's own ID for it
+(`CLAUDE_CODE_HOST_SESSION_ID`, a `local_…` ID). **Open in …** on a Claude update or "needs
+you": Claude opens that very session (its `claude://code/continue?session=…` link; a session
+running from before learns its ID with its next event); Terminal and iTerm select the exact
+tab; VS Code, Cursor and Antigravity focus the project's window; Warp comes to the front.
 
 ## Keep awake
 

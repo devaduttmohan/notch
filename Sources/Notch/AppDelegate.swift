@@ -213,7 +213,9 @@ import Combine
                 self?.keepAwake.commandFinished(id: id)
             }
             if message["type"] as? String == "claude", let hook = message["hook"] as? [String: Any] {
-                if settings.claude { claude?.handle(hook, ancestors: message["ancestors"] as? [Int] ?? []) }
+                if settings.claude {
+                    claude?.handle(hook, ancestors: message["ancestors"] as? [Int] ?? [], appSession: message["appSession"] as? String)
+                }
             } else if settings.commands, let banner = CommandAlerts.banner(for: message) {
                 model?.show(banner)
             }

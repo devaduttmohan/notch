@@ -9,18 +9,19 @@ struct SessionHost: Equatable {
     var name: String
     var tty: String?          // "/dev/ttys003" when Claude Code runs in a terminal tab
     var folder: String?       // the session's working folder
+    var appSession: String?   // the Claude app's own ID for the session ("local_…"), when it started it
 
     static let editors = ["com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mzl4w4u92",
                           "com.google.antigravity-ide", "com.vscodium"]
 
     /// The nearest app above the hook, nearest process first.
-    @MainActor static func resolve(ancestors: [Int], folder: String?) -> SessionHost? {
+    @MainActor static func resolve(ancestors: [Int], folder: String?, appSession: String? = nil) -> SessionHost? {
         var tty: String?
         for pid in ancestors.map({ pid_t($0) }) {
             if tty == nil { tty = terminal(of: pid) }
             if let app = NSRunningApplication(processIdentifier: pid), app.activationPolicy == .regular,
                let id = app.bundleIdentifier {
-                return SessionHost(appPID: pid, bundleID: id, name: name(of: app), tty: tty, folder: folder)
+                return SessionHost(appPID: pid, bundleID: id, name: name(of: app), tty: tty, folder: folder, appSession: appSession)
             }
         }
         return nil
@@ -48,9 +49,9 @@ struct SessionHost: Equatable {
 }
 
 /// Brings a session's app forward, as close to the session as the app allows:
-/// Terminal and iTerm select the exact tab; VS Code, Cursor and Antigravity focus the
-/// window with the project; Claude and Warp come to the front (neither has a supported
-/// way to open one specific session from outside).
+/// Claude opens the session itself (its claude://code/continue link, with the app's own
+/// session ID); Terminal and iTerm select the exact tab; VS Code, Cursor and Antigravity
+/// focus the window with the project; Warp comes to the front.
 enum SessionJump {
     @MainActor static func open(_ host: SessionHost) {
         let app = NSRunningApplication(processIdentifier: host.appPID)
@@ -59,6 +60,12 @@ enum SessionJump {
             return log("claude: couldn't find \(host.name) to open")
         }
         switch host.bundleID {
+        case claudeApp where host.appSession != nil:
+            if let link = continueLink(host.appSession!), NSWorkspace.shared.open(link) {
+                log("claude: opened the session in Claude (\(host.appSession!))")
+                return
+            }
+            bringForward(bundleURL)
         case "com.apple.Terminal" where host.tty != nil:
             script(terminalTab(host.tty!), fallback: bundleURL)
         case "com.googlecode.iterm2" where host.tty != nil:
@@ -71,6 +78,14 @@ enum SessionJump {
             bringForward(bundleURL)
         }
         log("claude: opened the session in \(host.name)" + (host.tty.map { " (\($0))" } ?? ""))
+    }
+
+    static let claudeApp = "com.anthropic.claudefordesktop"
+
+    /// The Claude app's link to one Code session (it takes only its own "local_…" IDs).
+    static func continueLink(_ appSession: String) -> URL? {
+        guard appSession.range(of: #"^local_[A-Za-z0-9-]{1,64}$"#, options: .regularExpression) != nil else { return nil }
+        return URL(string: "claude://code/continue?session=\(appSession)")
     }
 
     /// Through Launch Services, which may bring another app forward even though Notch isn't
