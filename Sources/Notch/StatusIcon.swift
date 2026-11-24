@@ -108,7 +108,7 @@ extension NotchModel {
     var statusPose: (pose: StatusIcon.Pose, tooltip: String) {
         if let wait = claudeWaits.first { return (.attention, "Notch · Claude needs you in \(wait.project)") }
         if let runaway { return (.attention, "Notch · \(runaway.name) is working hard") }
-        let news = claudeUpdates.count + prUpdates.count
+        let news = unreadNews
         if news > 0 { return (.attention, "Notch · \(news) update\(news == 1 ? "" : "s") waiting") }
         if let activity = compactActivity { return (.active, "Notch · \(activity.kind.title)") }
         return (.idle, "Notch")

@@ -122,6 +122,8 @@ struct ClaudeUpdate: Equatable, Identifiable {
     var message: String?          // the start of Claude's last reply, how long it ran, …
     var since = Date()
     var host: String? = nil       // the app the session runs in, for "Open in …"
+    /// Had its seconds on the notch (Behaviour › Alerts › Hide after): unread in the open island only.
+    var hidden = false
 
     /// The banner it shows as; `waiting` is how many updates there are in all.
     func banner(waiting: Int) -> Banner {
@@ -206,13 +208,26 @@ extension Activity {
     }
 }
 
-/// News from Flock about your PRs. Like a Claude update it stays on the notch until you've
-/// looked at the PR page; a newer one about the same PR replaces it.
+/// News from Flock about your PRs (or any PR news, when PR alerts are set to stay). Like a
+/// Claude update it stays on the notch until you've looked at the PR page; a newer one from the
+/// same source about the same PR replaces it.
 struct PRUpdate: Equatable, Identifiable {
     var id = UUID()
     var prIDs: [String]
     var banner: Banner
     var since = Date()
+    var source: AlertSource = .flock
+    var hidden = false            // had its seconds on the notch; unread in the open island only
+}
+
+/// A build or command alert set to stay until seen: a build's until you've looked at the
+/// builds page (or, without one, opened the island), a command's until you've opened the island.
+struct Notice: Equatable, Identifiable {
+    var id = UUID()
+    var source: AlertSource       // .builds or .commands
+    var banner: Banner
+    var since = Date()
+    var hidden = false
 }
 
 enum PRAction {
@@ -273,7 +288,14 @@ enum Activity: Equatable {
     @Published var layout: NotchLayout
     /// The pointer is on the island but it isn't open yet (Click / Hover & hold): it swells
     /// a little to say "click me".
-    @Published var armed = false
+    @Published var armed = false {
+        didSet { if armed != oldValue { refreshStickyClock() } }
+    }
+    /// Nobody's at the Mac (screen locked, displays asleep, switched to another user): news set
+    /// to hide by itself doesn't count its seconds.
+    var away = false {
+        didSet { if away != oldValue { refreshStickyClock() } }
+    }
     /// The next or current meeting, kept up to date by `Meetings`.
     @Published var meeting: Meeting?
     /// A process working far too hard (from `SystemMonitor`).
@@ -325,21 +347,36 @@ enum Activity: Equatable {
                 openPRChosen = false
                 copyMenuPR = nil
             }
+            refreshStickyClock()
         }
     }
-    @Published var forcedState: NotchState?      // --state flag, for development
+    @Published var forcedState: NotchState? {    // --state flag, for development
+        didSet { refreshStickyClock() }
+    }
     @Published var timer: TimerInfo? {
         didSet { scheduleTimerCheck() }
     }
     /// Every player we know about, keyed by `NowPlaying.key`; `nowPlaying` picks one.
     @Published private(set) var players: [String: NowPlaying] = [:]
     /// Claude Code sessions waiting on you, newest first.
-    @Published private(set) var claudeWaits: [ClaudeWait] = []
-    @Published private(set) var banner: Banner?
+    @Published private(set) var claudeWaits: [ClaudeWait] = [] {
+        didSet { refreshStickyClock() }
+    }
+    @Published private(set) var banner: Banner? {
+        didSet { refreshStickyClock() }
+    }
     /// Claude Code updates you haven't looked at yet, newest first.
-    @Published private(set) var claudeUpdates: [ClaudeUpdate] = []
+    @Published private(set) var claudeUpdates: [ClaudeUpdate] = [] {
+        didSet { refreshStickyClock() }
+    }
     /// Flock's news about your PRs you haven't looked at yet, newest first.
-    @Published private(set) var prUpdates: [PRUpdate] = []
+    @Published private(set) var prUpdates: [PRUpdate] = [] {
+        didSet { refreshStickyClock() }
+    }
+    /// Build and command alerts set to stay until seen, newest first.
+    @Published private(set) var notices: [Notice] = [] {
+        didSet { refreshStickyClock() }
+    }
     /// The section you last chose in the open island (a tab, a swipe, the bubble): the closed
     /// island keeps showing it, unless something needs you right now.
     @Published var pinned: ActivityKind?
@@ -359,6 +396,15 @@ enum Activity: Equatable {
     private var prsShownAt: Date?
     private var buildsShownAt: Date?
     private var prUpdatesRead = false
+    private var buildNoticesRead = false
+    /// The unread news on the closed notch that's counting its seconds (Alerts › Hide after),
+    /// and how long each has been on screen so far.
+    private var stickyClock: (id: UUID, since: Date, seconds: TimeInterval)?
+    private var stickyTimer: Timer?
+    private var stickyShown: [UUID: TimeInterval] = [:]
+    /// Build and command alerts that have been the banner on the notch while you were there:
+    /// only those are read by opening the island.
+    private var noticesShown: Set<UUID> = []
     private var artworkTintKey: String?
     private var settingsWatch: AnyCancellable?
     private var settings: NotchSettings { SettingsStore.shared.value }
@@ -387,12 +433,28 @@ enum Activity: Equatable {
         }
         if !new.builds {
             builds = nil
+            notices.removeAll { $0.source == .builds }
             if pinned == .builds { pinned = nil }
         }
+        if !new.commands { notices.removeAll { $0.source == .commands } }
         if !new.loadMonitor {
             load = nil
             if pinned == .load { pinned = nil }
         }
+        // A changed Alerts setting applies to the news on the notch now: a source set back to
+        // Until seen brings its hidden news back. (This runs before the store takes the new
+        // value, so it's passed in.)
+        let staying = Set(AlertSource.allCases.filter { new.hideAfter($0) == nil })
+        if staying.contains(.claude), claudeUpdates.contains(where: \.hidden) {
+            claudeUpdates = claudeUpdates.map { var update = $0; update.hidden = false; return update }
+        }
+        if prUpdates.contains(where: { $0.hidden && staying.contains($0.source) }) {
+            prUpdates = prUpdates.map { var update = $0; if staying.contains(update.source) { update.hidden = false }; return update }
+        }
+        if notices.contains(where: { $0.hidden && staying.contains($0.source) }) {
+            notices = notices.map { var notice = $0; if staying.contains(notice.source) { notice.hidden = false }; return notice }
+        }
+        refreshStickyClock(new)
     }
 
     // MARK: What to show
@@ -495,10 +557,20 @@ enum Activity: Equatable {
         var list: [Activity] = []
         if let wait = claudeWaits.first { list.append(.claude(wait)) }
         // Unread news next, newest first: opening the island is how you read it.
-        var news: [(Date, Activity)] = []
-        if let update = claudeUpdates.first { news.append((update.since, .claudeUpdate(update))) }
-        if let update = prUpdates.first, let prSummary { news.append((update.since, .pullRequests(prSummary))) }
-        list += news.sorted { $0.0 > $1.0 }.map(\.1)
+        // What's on the notch first (hidden news has had its time there), then the newest.
+        var news: [(onNotch: Bool, since: Date, page: Activity)] = []
+        if let update = claudeUpdates.first {
+            let shown = claudeUpdates.first { !$0.hidden }
+            news.append((shown != nil, (shown ?? update).since, .claudeUpdate(update)))
+        }
+        if let update = prUpdates.first, let prSummary {
+            let shown = prUpdates.first { !$0.hidden }
+            news.append((shown != nil, (shown ?? update).since, .pullRequests(prSummary)))
+        }
+        if let notice = buildNews, let builds {
+            news.append((!notice.hidden, notice.since, .builds(builds)))
+        }
+        list += news.sorted { $0.onNotch != $1.onNotch ? $0.onNotch : $0.since > $1.since }.map(\.page)
         list += priorityActivities.filter { activity in activity.kind != .claude && !list.contains { $0.kind == activity.kind } }
         // A section you chose that isn't live on its own still gets its tab. Not PRs or builds:
         // they always have theirs, in a fixed place below, so choosing one (which pins it)
@@ -526,9 +598,16 @@ enum Activity: Equatable {
     var expandedActivity: Activity? {
         let pages = pages
         if let page, let chosen = pages.first(where: { $0.kind == page }) { return chosen }
-        if let first = pages.first, [.claude, .claudeUpdates].contains(first.kind) || !prUpdates.isEmpty { return first }
+        if let first = pages.first, [.claude, .claudeUpdates].contains(first.kind) || !prUpdates.isEmpty
+            || buildNews != nil { return first }
         if let pill = liveActivities.first?.kind, let match = pages.first(where: { $0.kind == pill }) { return match }
         return pages.first
+    }
+
+    /// The newest build alert waiting to be seen, when there's a builds page to see it on.
+    private var buildNews: Notice? {
+        guard let builds, settings.builds, !builds.all.isEmpty else { return nil }
+        return notices.first { $0.source == .builds }
     }
 
     /// How tall the PR page's content is (measured by the view), so the island can fit it.
@@ -631,7 +710,7 @@ enum Activity: Equatable {
         loadPageShown?(shown == .load)
         if shown == .builds { buildsShownAt = buildsShownAt ?? now }
         else if let since = buildsShownAt {
-            if now.timeIntervalSince(since) >= 0.5 { buildsSeen?() }
+            if now.timeIntervalSince(since) >= 0.5 { buildsSeen?(); buildNoticesRead = true }
             buildsShownAt = nil
         }
     }
@@ -648,7 +727,7 @@ enum Activity: Equatable {
     /// any activity; otherwise invisible.
     var restingState: NotchState {
         if banner != nil { return .banner }
-        if claudeWaits.isEmpty, !claudeUpdates.isEmpty || !prUpdates.isEmpty { return .banner }
+        if claudeWaits.isEmpty, stickyLead != nil { return .banner }
         return compactActivity == nil ? .idle : .compact
     }
 
@@ -657,21 +736,138 @@ enum Activity: Equatable {
         banner ?? stickyBanner
     }
 
-    /// The newest unread update (Claude's or Flock's), with a count when several wait.
-    var stickyBanner: Banner? {
-        let waiting = claudeUpdates.count + prUpdates.count
-        let claude = claudeUpdates.first, pr = prUpdates.first
-        if let pr, claude.map({ pr.since > $0.since }) ?? true {
-            var shown = pr.banner
-            shown.id = pr.id
-            shown.duration = .infinity
-            if waiting > 1 { shown.accessory = .count(waiting) }
-            return shown
+    /// The newest unread update (Claude's, a PR's, a build's or a command's) that hasn't had
+    /// its seconds on the notch, with a count when several wait.
+    var stickyBanner: Banner? { stickyLead?.banner }
+
+    /// All unread news, hidden or not: what the menu bar and Clear Updates count.
+    var unreadNews: Int { claudeUpdates.count + prUpdates.count + notices.count }
+
+    /// The news the closed notch shows, and its own time (for Auto).
+    private var stickyLead: (id: UUID, source: AlertSource, banner: Banner, own: TimeInterval)? {
+        let waiting = unreadNews
+        var lead: (id: UUID, source: AlertSource, banner: Banner, own: TimeInterval, since: Date)?
+        // Newest first; on a tie, Claude's.
+        func consider(_ id: UUID, _ source: AlertSource, _ since: Date, _ own: TimeInterval, _ banner: () -> Banner) {
+            if lead.map({ since > $0.since }) ?? true { lead = (id, source, banner(), own, since) }
         }
-        return claude?.banner(waiting: waiting)
+        if let claude = claudeUpdates.first(where: { !$0.hidden }) {
+            consider(claude.id, .claude, claude.since, 10) { claude.banner(waiting: waiting) }
+        }
+        for item in [prUpdates.first { !$0.hidden }.map { ($0.id, $0.source, $0.since, $0.banner) },
+                     notices.first { !$0.hidden }.map { ($0.id, $0.source, $0.since, $0.banner) }] {
+            guard let (id, source, since, banner) = item else { continue }
+            consider(id, source, since, banner.duration) {
+                var shown = banner
+                shown.id = id
+                shown.duration = .infinity
+                if waiting > 1 { shown.accessory = .count(waiting) }
+                return shown
+            }
+        }
+        return lead.map { ($0.id, $0.source, $0.banner, $0.own) }
+    }
+
+    /// News set to hide by itself (Alerts › Hide after) counts its seconds only while it's the
+    /// banner on the closed notch and you're there: not behind a passing banner or "Claude
+    /// needs you", not while the island is open or the pointer rests on it, not while you're
+    /// away. Then it leaves the notch, still unread in the open island.
+    private func refreshStickyClock(_ current: NotchSettings? = nil) {
+        let now = Date()
+        let unread = Set(claudeUpdates.map(\.id) + prUpdates.map(\.id) + notices.map(\.id))
+        noticesShown.formIntersection(unread)
+        let onNotch = forcedState == nil && !hovering && !away && banner == nil && claudeWaits.isEmpty ? stickyLead : nil
+        if let onNotch, notices.contains(where: { $0.id == onNotch.id }) { noticesShown.insert(onNotch.id) }
+        var timed: (id: UUID, seconds: TimeInterval)?
+        if let lead = onNotch, !armed, let hideAfter = (current ?? settings).hideAfter(lead.source) {
+            timed = (lead.id, hideAfter > 0 ? hideAfter : (lead.own.isFinite && lead.own > 0 ? lead.own : 10))
+        }
+        if let clock = stickyClock, let timed, clock.id == timed.id, clock.seconds == timed.seconds { return }
+        if stickyClock == nil, timed == nil { return }
+        if let clock = stickyClock {
+            stickyShown[clock.id, default: 0] += now.timeIntervalSince(clock.since) / Motion.debugSlowdown
+        }
+        stickyTimer?.invalidate()
+        stickyTimer = nil
+        stickyClock = nil
+        stickyShown = stickyShown.filter { unread.contains($0.key) }
+        guard let timed else { return }
+        stickyClock = (timed.id, now, timed.seconds)
+        let left = max(0, timed.seconds - stickyShown[timed.id, default: 0])
+        stickyTimer = Timer.scheduledTimer(withTimeInterval: left * Motion.debugSlowdown, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hideSticky(timed.id) }
+        }
+    }
+
+    /// Its seconds are up: off the notch, and so is any older news set to hide (the badge
+    /// counted it; it waits, unread, in the open island). A command's has nothing to show
+    /// there, so it goes.
+    private func hideSticky(_ id: UUID) {
+        stickyTimer = nil
+        stickyClock = nil
+        let since = claudeUpdates.first { $0.id == id }?.since ?? prUpdates.first { $0.id == id }?.since
+            ?? notices.first { $0.id == id }?.since
+        guard let since else { return refreshStickyClock() }
+        let current = settings
+        func due(_ itemSince: Date, _ source: AlertSource) -> Bool { itemSince <= since && current.hideAfter(source) != nil }
+        if claudeUpdates.contains(where: { !$0.hidden && due($0.since, .claude) }) {
+            claudeUpdates = claudeUpdates.map { var update = $0; if due(update.since, .claude) { update.hidden = true }; return update }
+        }
+        if prUpdates.contains(where: { !$0.hidden && due($0.since, $0.source) }) {
+            prUpdates = prUpdates.map { var update = $0; if due(update.since, update.source) { update.hidden = true }; return update }
+        }
+        if notices.contains(where: { !$0.hidden && due($0.since, $0.source) }) {
+            notices = notices.compactMap { notice in
+                guard due(notice.since, notice.source) else { return notice }
+                if notice.source == .commands { return nil }
+                var hidden = notice
+                hidden.hidden = true
+                return hidden
+            }
+        }
+        // Brought back (set to stay again), they start their time afresh.
+        let hidden = Set(claudeUpdates.filter(\.hidden).map(\.id) + prUpdates.filter(\.hidden).map(\.id) + notices.filter(\.hidden).map(\.id))
+        stickyShown = stickyShown.filter { !hidden.contains($0.key) }
     }
 
     // MARK: Banners
+
+    /// An alert from a source in Behaviour › Alerts (not Claude's: `claudeUpdate`). Set to
+    /// hide after some seconds, a PR, build or command alert passes like any banner, for those
+    /// seconds; Flock's, and any set to stay, wait as news until you've looked.
+    func alert(_ banner: Banner, from source: AlertSource, about prIDs: [String] = []) {
+        let current = settings
+        // Not from a module that's off (a look that was under way when it was switched off).
+        guard [.pullRequests, .flock].contains(source) ? current.pullRequests
+                : source == .builds ? current.builds : source == .commands ? current.commands : true else { return }
+        let hideAfter = current.hideAfter(source)
+        switch source {
+        case .claude:
+            show(banner)                  // not used: Claude's news comes through `claudeUpdate`
+        case .flock:
+            prUpdate(PRUpdate(prIDs: prIDs, banner: banner, source: .flock))
+        case .pullRequests, .builds, .commands:
+            if let hideAfter {
+                var passing = banner
+                if hideAfter > 0 { passing.duration = hideAfter }    // Auto: its own time
+                show(passing)
+            } else if source == .pullRequests {
+                prUpdate(PRUpdate(prIDs: prIDs, banner: banner, source: .pullRequests))
+            } else {
+                notice(Notice(source: source, banner: banner))
+            }
+        }
+    }
+
+    /// A build or command alert that stays until seen.
+    func notice(_ notice: Notice) {
+        notices.insert(notice, at: 0)
+        if notices.count > 20 { notices.removeLast(notices.count - 20) }
+        if !quiet {
+            log("notice: \(notice.banner.title)\(notice.banner.subtitle.map { " — \($0)" } ?? "") (stays until you look)")
+            Haptics.tap(.alignment)
+        }
+    }
 
     func show(_ banner: Banner) {
         if !quiet { log("banner: \(banner.title)\(banner.subtitle.map { " — \($0)" } ?? "")") }
@@ -744,7 +940,7 @@ enum Activity: Equatable {
         claudeUpdates.removeAll { !Set($0.sessions).isDisjoint(with: update.sessions) }
         claudeUpdates.insert(update, at: 0)
         if claudeUpdates.count > 20 { claudeUpdates.removeLast(claudeUpdates.count - 20) }
-        if !quiet { log("claude update: \(update.banner(waiting: 1).title)\(update.message.map { " — \($0)" } ?? "") (stays until you look)") }
+        if !quiet { log("claude update: \(update.banner(waiting: 1).title)\(update.message.map { " — \($0)" } ?? "") \(Self.lasts(settings.hideAfter(.claude)))") }
         if !quiet { Haptics.tap(.alignment) }
     }
 
@@ -752,11 +948,13 @@ enum Activity: Equatable {
         claudeUpdates.removeAll()
     }
 
-    /// The menu's Clear Updates: Claude's waiting news and "needs you", and Flock's news.
+    /// The menu's Clear Updates: Claude's waiting news and "needs you", PR news, and build and
+    /// command alerts waiting to be seen.
     func clearUpdates() {
         claudeWaits.removeAll()
         claudeUpdates.removeAll()
         prUpdates.removeAll()
+        notices.removeAll()
     }
 
     /// Moving away from the open notch after it showed your Claude updates counts as having
@@ -764,19 +962,30 @@ enum Activity: Equatable {
     /// arrived in the last half second.
     private func acknowledgeClaudeUpdates() {
         let now = Date()
-        defer { hoverStarted = nil; updatesRead = false; prUpdatesRead = false }
+        let opened = hoverStarted.map { now.timeIntervalSince($0) >= 0.5 } ?? false
+        defer { hoverStarted = nil; updatesRead = false; prUpdatesRead = false; buildNoticesRead = false }
         guard forcedState == nil else { return }
         if updatesRead { claudeUpdates.removeAll { now.timeIntervalSince($0.since) >= 0.5 } }
         if prUpdatesRead { prUpdates.removeAll { now.timeIntervalSince($0.since) >= 0.5 } }
+        // A build's alert: seen on the builds page, or (with no such page) by opening the island
+        // after it was on the notch; a command's: by opening the island after it was on the notch.
+        let buildsPage = pages.contains { $0.kind == .builds }
+        let read = notices.filter { notice in
+            guard now.timeIntervalSince(notice.since) >= 0.5 else { return false }
+            let openedAfter = opened && noticesShown.contains(notice.id)
+            return notice.source == .builds ? buildNoticesRead || (openedAfter && !buildsPage) : openedAfter
+        }.map(\.id)
+        if !read.isEmpty { notices.removeAll { read.contains($0.id) } }
     }
 
-    /// Flock news that stays until you've looked (a newer one about the same PR replaces it).
+    /// PR news that stays until you've looked: Flock's, and any when PR alerts are set to stay.
+    /// A newer one from the same source about the same PR replaces it.
     func prUpdate(_ update: PRUpdate) {
-        prUpdates.removeAll { !Set($0.prIDs).isDisjoint(with: update.prIDs) }
+        prUpdates.removeAll { $0.source == update.source && !Set($0.prIDs).isDisjoint(with: update.prIDs) }
         prUpdates.insert(update, at: 0)
         if prUpdates.count > 20 { prUpdates.removeLast(prUpdates.count - 20) }
         if !quiet {
-            log("pr update: \(update.banner.title)\(update.banner.subtitle.map { " — \($0)" } ?? "") (stays until you look)")
+            log("pr update: \(update.banner.title)\(update.banner.subtitle.map { " — \($0)" } ?? "") \(Self.lasts(settings.hideAfter(update.source)))")
             Haptics.tap(.alignment)
         }
     }
@@ -903,5 +1112,11 @@ enum Activity: Equatable {
         claudeWaits.removeAll()
         claudeUpdates.removeAll()
         prUpdates.removeAll()
+        notices.removeAll()
+    }
+
+    /// For the log: how long a piece of news stays on the notch.
+    private static func lasts(_ hideAfter: TimeInterval?) -> String {
+        hideAfter.map { "(on the notch for \(Int($0)) s)" } ?? "(stays until you look)"
     }
 }

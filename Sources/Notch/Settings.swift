@@ -28,6 +28,20 @@ struct NotchSettings: Codable, Equatable {
     var display: DisplayChoice = .notched
     var pinAboveSpaces = true                 // stay on screen through Space switches (private window-server API)
 
+    // Alerts: each source's stay on the notch until you've looked, or hide after some seconds;
+    // 0 is Auto, each alert's own time (4-7 s). Flat keys, so a file from an older version
+    // falls back to these one by one.
+    var claudeAlertStays = true
+    var claudeAlertSeconds: Double = 10
+    var prAlertStays = false
+    var prAlertSeconds: Double = 0
+    var flockAlertStays = true
+    var flockAlertSeconds: Double = 10
+    var buildAlertStays = false
+    var buildAlertSeconds: Double = 0
+    var commandAlertStays = false
+    var commandAlertSeconds: Double = 0
+
     // Modules
     var music = true
     var timers = true
@@ -71,6 +85,48 @@ struct NotchSettings: Codable, Equatable {
     // Keep awake
     var keepAwakeClaude = true                // while a Claude Code turn is running
     var keepAwakeCommands = true              // while `notchctl run` commands run
+}
+
+/// Where an alert comes from, for Behaviour › Alerts.
+enum AlertSource: CaseIterable, Identifiable {
+    case claude, pullRequests, flock, builds, commands
+    var id: Self { self }
+
+    var stays: WritableKeyPath<NotchSettings, Bool> {
+        switch self {
+        case .claude: \.claudeAlertStays
+        case .pullRequests: \.prAlertStays
+        case .flock: \.flockAlertStays
+        case .builds: \.buildAlertStays
+        case .commands: \.commandAlertStays
+        }
+    }
+
+    var seconds: WritableKeyPath<NotchSettings, Double> {
+        switch self {
+        case .claude: \.claudeAlertSeconds
+        case .pullRequests: \.prAlertSeconds
+        case .flock: \.flockAlertSeconds
+        case .builds: \.buildAlertSeconds
+        case .commands: \.commandAlertSeconds
+        }
+    }
+
+    /// The steps of the seconds control: PR, build and command alerts start at Auto (0), their
+    /// own times; Claude's and Flock's news has none.
+    var steps: [Double] {
+        let seconds: [Double] = [3, 4, 5, 6, 7, 8, 10, 12, 15, 20, 30, 45, 60, 90, 120]
+        return [.claude, .flock].contains(self) ? seconds : [0] + seconds
+    }
+}
+
+extension NotchSettings {
+    /// How long an alert from `source` shows: nil until you've looked; 0 for its own time.
+    func hideAfter(_ source: AlertSource) -> TimeInterval? {
+        guard !self[keyPath: source.stays] else { return nil }
+        let seconds = self[keyPath: source.seconds]
+        return seconds > 0 ? min(max(1, seconds), 3600) : 0
+    }
 }
 
 /// When the closed island shows CPU & memory: always, only while the Mac is busy, or never

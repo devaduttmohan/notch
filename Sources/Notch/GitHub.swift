@@ -463,7 +463,11 @@ enum PRDiff {
         case displaysAsleep = "displays asleep"
         case switchedOut = "switched to another user"
     }
-    private(set) var away: Set<AwayReason> = []
+    private(set) var away: Set<AwayReason> = [] {
+        didSet { if away.isEmpty != oldValue.isEmpty { onAwayChange?(!away.isEmpty) } }
+    }
+    /// Told when you go away or come back (the notch's Alerts › Hide after doesn't count then).
+    var onAwayChange: ((Bool) -> Void)?
     /// The session dictionary's lock flag is undocumented, so it's only trusted to end a pause
     /// once it has been seen confirming one.
     private var lockFlagSeen = false

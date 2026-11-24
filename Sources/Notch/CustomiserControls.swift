@@ -234,6 +234,67 @@ struct NButton: View {
     }
 }
 
+/// − 8 s +, in the segmented control's capsule, stepping through `steps`; the number rolls as
+/// it changes. Dimmed, not hidden, while it doesn't apply.
+struct NSecondsStepper: View {
+    @Binding var value: Double
+    let steps: [Double]
+    var enabled = true
+
+    var body: some View {
+        let index = steps.indices.min { abs(steps[$0] - value) < abs(steps[$1] - value) } ?? 0
+        HStack(spacing: 0) {
+            step(-1, from: index, symbol: "minus")
+            Text(Self.label(value))
+                .font(.system(size: 12, weight: .semibold))
+                .monospacedDigit()
+                .contentTransition(.numericText(value: value))
+                .frame(minWidth: 44)
+            step(1, from: index, symbol: "plus")
+        }
+        .padding(3)
+        .background(Capsule().fill(Color.white.opacity(0.06)))
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.05)))
+        .opacity(enabled ? 1 : 0.35)
+        .allowsHitTesting(enabled)
+        .animation(UISpring.snap, value: enabled)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Seconds")
+        .accessibilityValue(Self.label(value))
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: move(1, from: index)
+            case .decrement: move(-1, from: index)
+            @unknown default: break
+            }
+        }
+    }
+
+    private func step(_ by: Int, from index: Int, symbol: String) -> some View {
+        let possible = steps.indices.contains(index + by)
+        return Button { move(by, from: index) } label: {
+            SymbolImage(symbol, size: 10, weight: .bold)
+                .frame(width: 26, height: 28)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressableStyle())
+        .foregroundStyle(possible ? Color.white : Palette.secondary)
+        .disabled(!possible)
+    }
+
+    private func move(_ by: Int, from index: Int) {
+        guard steps.indices.contains(index + by) else { return }
+        withAnimation(UISpring.snap) { value = steps[index + by] }
+    }
+
+    /// 0 is Auto: each alert's own time.
+    static func label(_ seconds: Double) -> String {
+        guard seconds > 0 else { return "Auto" }
+        let whole = Int(min(seconds, 86_400).rounded())
+        return whole >= 60 && whole % 60 == 0 ? "\(whole / 60) min" : "\(whole) s"
+    }
+}
+
 /// A row of colour dots; the chosen one gets a ring that springs in.
 struct AccentPicker: View {
     @Binding var selection: AccentChoice

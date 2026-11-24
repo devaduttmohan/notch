@@ -572,6 +572,7 @@ struct BehaviourPane: View {
                         .frame(width: 330)
                 }
             }
+            AlertsCard(store: store)
             NCard(title: "Keep awake", symbol: "cup.and.heat.waves.fill") {
                 NRow(title: "While Claude Code is working",
                      detail: "From your prompt until Claude stops; not while it waits on you.") {
@@ -622,6 +623,66 @@ struct BehaviourPane: View {
         case .hold: "Rest the pointer on it for a moment: it swells, then opens."
         case .click: "It swells under the pointer; click to open."
         }
+    }
+}
+
+/// Behaviour › Alerts: for each source, stay on the notch until you've looked, or hide after
+/// some seconds.
+struct AlertsCard: View {
+    @ObservedObject var store: SettingsStore
+
+    var body: some View {
+        NCard(title: "Alerts", symbol: "bell.badge.fill") {
+            ForEach(AlertSource.allCases) { source in
+                AlertRow(source: source, stays: binding(source.stays), seconds: binding(source.seconds))
+            }
+            Text("Until seen: on the notch until you've looked at it in the open island (a command's, until you open it after it showed). Hide after: on the notch for that long (Auto: each alert's usual 4–7 s); Claude's and Flock's news then waits, unread, in the open island, and their seconds don't count while you're away.")
+                .font(.system(size: 11)).foregroundStyle(Palette.tertiary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func binding<Value>(_ path: WritableKeyPath<NotchSettings, Value>) -> Binding<Value> {
+        Binding(get: { store.value[keyPath: path] }, set: { store.value[keyPath: path] = $0 })
+    }
+}
+
+private struct AlertRow: View {
+    let source: AlertSource
+    @Binding var stays: Bool
+    @Binding var seconds: Double
+
+    var body: some View {
+        HStack(spacing: 12) {
+            IconTile(symbol: source.symbol, color: source.color, size: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(source.title).font(.system(size: 13, weight: .medium))
+                Text(source.detail).font(.system(size: 11.5)).foregroundStyle(Palette.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 10)
+            NSegmented(selection: $stays, options: [(true, "Until seen"), (false, "Hide after")])
+                .frame(width: 196)
+            NSecondsStepper(value: $seconds, steps: source.steps, enabled: !stays)
+        }
+    }
+}
+
+extension AlertSource {
+    var title: String {
+        [.claude: "Claude Code", .pullRequests: "Pull requests", .flock: "Flock reviews",
+         .builds: "Jenkins builds", .commands: "Commands"][self]!
+    }
+    var detail: String {
+        [.claude: "Finished, session ended", .pullRequests: "Checks, reviews, comments",
+         .flock: "Flock's news on your PRs", .builds: "Passed, failed",
+         .commands: "notchctl say and run"][self]!
+    }
+    var symbol: String {
+        [.claude: "sparkle", .pullRequests: PullRequestIcon.symbolName, .flock: "bird.fill",
+         .builds: "hammer.fill", .commands: "terminal.fill"][self]!
+    }
+    var color: Color {
+        [.claude: .claude, .pullRequests: .prGreen, .flock: Color(red: 0.55, green: 0.42, blue: 0.95),
+         .builds: .buildBlue, .commands: Color(white: 0.4)][self]!
     }
 }
 

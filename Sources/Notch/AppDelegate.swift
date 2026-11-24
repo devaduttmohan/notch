@@ -112,13 +112,14 @@ import Combine
         }
         prs.onEvents = { [weak self, weak model] events in
             guard let self, let model else { return }
-            // Flock's news stays until you've looked; everything else passes like any banner.
-            let flock = events.filter(\.fromFlock)
-            if let banner = PRBanner.banner(for: events.filter { !$0.fromFlock }, mainRepo: self.prs.mainRepo) {
-                model.show(banner)
+            // Flock's news and the rest are set apart in Behaviour › Alerts: each stays until
+            // you've looked, or shows for some seconds.
+            let flock = events.filter(\.fromFlock), others = events.filter { !$0.fromFlock }
+            if let banner = PRBanner.banner(for: others, mainRepo: self.prs.mainRepo) {
+                model.alert(banner, from: .pullRequests, about: others.map(\.pr.id))
             }
             if let banner = PRBanner.banner(for: flock, mainRepo: self.prs.mainRepo) {
-                model.prUpdate(PRUpdate(prIDs: flock.map(\.pr.id), banner: banner))
+                model.alert(banner, from: .flock, about: flock.map(\.pr.id))
             }
         }
         model.prAction = { [weak self] action in
@@ -130,6 +131,7 @@ import Combine
             }
         }
         model.prsSeen = { [weak self] in self?.prs.markSeen() }
+        prs.onAwayChange = { [weak model] away in model?.away = away }
         prs.start()
     }
 
@@ -144,7 +146,7 @@ import Combine
             model.jenkinsServer = JenkinsWatcher.serverURL(settings.jenkinsURL)
             model.builds = settings.builds && jenkins.phase == .signedIn ? jenkins.summary : nil
         }
-        jenkins.onFinished = { [weak model] build in model?.show(BuildBanner.banner(for: build)) }
+        jenkins.onFinished = { [weak model] build in model?.alert(BuildBanner.banner(for: build), from: .builds) }
         model.buildAction = { NSWorkspace.shared.open($0) }
         model.buildsSeen = { jenkins.markSeen() }
         prs.onPush = { jenkins.lookSoon() }
@@ -197,8 +199,8 @@ import Combine
         // The timer item says what it will do; it's hidden when timers are switched off.
         timerItem?.title = model?.timer == nil ? "Start Focus Timer (25 min)" : "Stop Focus Timer"
         timerItem?.isHidden = !SettingsStore.shared.value.timers
-        // Clear Updates only when there's something to clear: Claude's and Flock's waiting news.
-        let waiting = (model?.claudeWaits.count ?? 0) + (model?.claudeUpdates.count ?? 0) + (model?.prUpdates.count ?? 0)
+        // Clear Updates only when there's something to clear: Claude's "needs you" and news waiting to be seen.
+        let waiting = (model?.claudeWaits.count ?? 0) + (model?.unreadNews ?? 0)
         clearItem?.isEnabled = waiting > 0
         clearItem?.title = waiting > 0 ? "Clear \(waiting) Update\(waiting == 1 ? "" : "s")" : "Clear Updates"
         // A new version of Notch: say which, and open where you can install it.
@@ -248,7 +250,7 @@ import Combine
                     claude?.handle(hook, ancestors: message["ancestors"] as? [Int] ?? [], appSession: message["appSession"] as? String)
                 }
             } else if settings.commands, let banner = CommandAlerts.banner(for: message) {
-                model?.show(banner)
+                model?.alert(banner, from: .commands)
             }
         }
         alerts.start()
