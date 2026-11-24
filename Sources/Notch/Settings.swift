@@ -64,6 +64,11 @@ struct NotchSettings: Codable, Equatable {
     // Pull requests
     var prIgnoredAuthors = ["saas-devops-2025", "surveysparrow-hatch"]   // bots whose comments are boilerplate
 
+    // Updates
+    var checkForUpdates = true                // look for new releases on GitHub about every 6 hours
+    var updateAnnounced = ""                  // the newest version a banner has announced
+    var lastRunVersion = ""                   // the version that ran last (an "Updated to …" banner when it changes)
+
     // Keep awake
     var keepAwakeClaude = true                // while a Claude Code turn is running
     var keepAwakeCommands = true              // while `notchctl run` commands run

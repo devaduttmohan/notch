@@ -17,8 +17,11 @@ import SwiftUI
         self.prs = prs
     }
 
-    func show(pane: Pane = .appearance) {
-        if window == nil { build(pane: pane) }
+    /// Opens the customiser; on `pane` if given (an open window switches to it), otherwise
+    /// where you left it.
+    func show(pane: Pane? = nil) {
+        if window == nil { build(pane: pane ?? .appearance) }
+        else if let pane { NotificationCenter.default.post(name: CustomiserView.showPane, object: pane.rawValue) }
         NSApp.setActivationPolicy(.regular)
         if let icon = AppIconArt.image(size: 512) { NSApp.applicationIconImage = icon }
         window?.makeKeyAndOrderFront(nil)

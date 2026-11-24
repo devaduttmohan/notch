@@ -260,9 +260,13 @@ struct CustomiserView: View {
     @ObservedObject var prs: PRWatcher
     @ObservedObject var director: PreviewDirector
     @ObservedObject var login: LoginItem
+    @ObservedObject var updater = Updater.shared
     private let pane: State<Pane>
     private let appeared: State<Bool>
     @Namespace private var ns
+
+    /// Asks an open customiser to show a pane (the menu bar's "Update to …").
+    static let showPane = Notification.Name("dev.notch.customiser.showPane")
 
     /// `animateIn: false` starts with everything in place (still renders).
     init(store: SettingsStore, meetings: Meetings, keepAwake: KeepAwake, prs: PRWatcher, director: PreviewDirector,
@@ -293,6 +297,11 @@ struct CustomiserView: View {
             withAnimation(UISpring.soft.delay(0.05)) { appeared.wrappedValue = true }
             if let scene = pane.wrappedValue.scene { director.show(scene) }
         }
+        .onReceive(NotificationCenter.default.publisher(for: Self.showPane)) { note in
+            if let wanted = (note.object as? String).flatMap(Pane.init(rawValue:)), wanted != pane.wrappedValue {
+                withAnimation(UISpring.snap) { pane.wrappedValue = wanted }
+            }
+        }
     }
 
     private var sidebar: some View {
@@ -312,6 +321,11 @@ struct CustomiserView: View {
                     IconTile(symbol: item.symbol, color: item.color, size: 24)
                     Text(item.title).font(.system(size: 13, weight: selected ? .semibold : .medium))
                     Spacer()
+                    if item == .about && updater.hasUpdate {
+                        Circle().fill(Palette.blue).frame(width: 7, height: 7)
+                            .transition(.scale.combined(with: .opacity))
+                            .help("A new version of Notch is available")
+                    }
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
@@ -1572,6 +1586,7 @@ struct MeetingsPane: View {
 
 struct AboutPane: View {
     @ObservedObject var store: SettingsStore
+    @ObservedObject var updater = Updater.shared
     private let confirmReset = State(initialValue: false)
 
     var body: some View {
@@ -1592,6 +1607,7 @@ struct AboutPane: View {
                     }
                 }
             }
+            UpdatesCard(store: store, updater: updater)
             NCard(title: "Files", symbol: "folder.fill") {
                 NRow(title: "Settings", detail: SettingsStore.fileURL.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")) {
                     NButton(title: "Show in Finder", symbol: "magnifyingglass") {
@@ -1628,6 +1644,168 @@ struct AboutPane: View {
     }
 
     private var logURL: URL { LogFile.url }
+}
+
+// MARK: - Updates
+
+/// New versions from GitHub: where things stand, and Update when there's one.
+struct UpdatesCard: View {
+    @ObservedObject var store: SettingsStore
+    @ObservedObject var updater: Updater
+
+    var body: some View {
+        NCard(title: "Updates", symbol: "arrow.down.circle") {
+            status
+                .animation(UISpring.soft, value: updater.phase)
+            if let release = updater.available, !release.highlights.isEmpty, !isBusy {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(release.highlights, id: \.self) { line in
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Circle().fill(Palette.blue).frame(width: 5, height: 5).offset(y: -1)
+                            Text(line).font(.system(size: 12)).foregroundStyle(Palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.04)))
+                .transition(.opacity.combined(with: .offset(y: -6)))
+            }
+            CardHairline()
+            NRow(title: "Check automatically", detail: "About every 6 hours, and when you open this page. Nothing is sent but the request.") {
+                NToggle(isOn: $store.value.checkForUpdates, tint: Palette.tint)
+            }
+        }
+        .onAppear { updater.checkIfStale() }
+        .onChange(of: store.value.checkForUpdates) { _, _ in updater.scheduleChecks() }
+    }
+
+    private var isBusy: Bool {
+        switch updater.phase {
+        case .downloading, .installing: true
+        default: false
+        }
+    }
+
+    @ViewBuilder private var status: some View {
+        let current = updater.currentVersion ?? "?"
+        switch updater.phase {
+        case .unavailable(let reason):
+            StatusLine(symbol: "exclamationmark.triangle.fill", tint: Palette.tertiary, title: "Updates aren't available here", detail: reason) { EmptyView() }
+        case .idle:
+            StatusLine(symbol: "arrow.down.circle", tint: Palette.secondary, title: "Not checked yet", detail: "You have \(current).") {
+                NButton(title: "Check now", symbol: "arrow.clockwise") { updater.check(manual: true) }
+            }
+        case .checking:
+            StatusLine(symbol: nil, tint: Palette.secondary, title: "Checking GitHub…", detail: "You have \(current).") {
+                NButton(title: "Check now", symbol: "arrow.clockwise") {}.opacity(0.4).disabled(true)
+            }
+        case .upToDate:
+            StatusLine(symbol: "checkmark.seal.fill", tint: .green, title: "Notch is up to date", detail: checkedLine(current)) {
+                NButton(title: "Check now", symbol: "arrow.clockwise") { updater.check(manual: true) }
+            }
+        case .available(let release):
+            StatusLine(symbol: "arrow.down.circle.fill", tint: Palette.blue, title: "Version \(release.version) is available",
+                       detail: "You have \(current)" + (release.size > 0 ? " · \(megabytes(release.size)) download" : "")) {
+                HStack(spacing: 8) {
+                    NButton(title: "What's new", symbol: "arrow.up.right") { NSWorkspace.shared.open(release.page) }
+                    NButton(title: "Update", symbol: "arrow.down", prominent: true) { updater.install() }
+                }
+            }
+        case .downloading(let release, let fraction):
+            VStack(alignment: .leading, spacing: 10) {
+                StatusLine(symbol: nil, tint: Palette.blue, title: "Downloading Notch \(release.version)…",
+                           detail: release.size > 0 ? "\(megabytes(Int(Double(release.size) * fraction))) of \(megabytes(release.size))" : "\(Int(fraction * 100))%") { EmptyView() }
+                UpdateProgress(fraction: fraction)
+            }
+        case .installing(let release):
+            VStack(alignment: .leading, spacing: 10) {
+                StatusLine(symbol: nil, tint: Palette.blue, title: "Installing Notch \(release.version)…",
+                           detail: "Checking the download; Notch will restart in a moment.") { EmptyView() }
+                UpdateProgress(fraction: 1)
+            }
+        case .failed(let message, let release):
+            StatusLine(symbol: "exclamationmark.triangle.fill", tint: .orange,
+                       title: release == nil ? "Couldn't check for updates" : "Couldn't update to \(release!.version)", detail: message) {
+                NButton(title: "Try again", symbol: "arrow.clockwise") {
+                    release == nil ? updater.check(manual: true) : updater.install()
+                }
+            }
+        }
+    }
+
+    private func checkedLine(_ current: String) -> String {
+        guard let checked = updater.lastChecked else { return "Version \(current)." }
+        let ago = Date().timeIntervalSince(checked)
+        let when = ago < 60 ? "just now" : ago < 3600 ? "\(Int(ago / 60)) min ago" : "\(Int(ago / 3600)) h ago"
+        return "Version \(current) · checked \(when)"
+    }
+
+    private func megabytes(_ bytes: Int) -> String { String(format: "%.1f MB", Double(bytes) / 1_000_000) }
+}
+
+/// An icon (or a spinner), what's happening, and what you can do.
+private struct StatusLine<Actions: View>: View {
+    let symbol: String?
+    let tint: Color
+    let title: String
+    let detail: String
+    @ViewBuilder let actions: Actions
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Group {
+                if let symbol {
+                    Image(systemName: symbol).font(.system(size: 20, weight: .semibold)).foregroundStyle(tint)
+                        .contentTransition(.symbolEffect(.replace))
+                } else {
+                    Spinner(tint: tint)
+                }
+            }
+            .frame(width: 28, height: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 13, weight: .semibold)).contentTransition(.interpolate)
+                Text(detail).font(.system(size: 11.5)).foregroundStyle(Palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .contentTransition(.numericText())
+            }
+            Spacer(minLength: 12)
+            actions
+        }
+    }
+}
+
+/// A turning arc, for checking and installing.
+private struct Spinner: View {
+    let tint: Color
+    private let turning = State(initialValue: false)
+
+    var body: some View {
+        Circle()
+            .trim(from: 0.12, to: 0.82)
+            .stroke(tint, style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
+            .frame(width: 18, height: 18)
+            .rotationEffect(.degrees(turning.wrappedValue ? 360 : 0))
+            .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: turning.wrappedValue)
+            .onAppear { turning.wrappedValue = true }
+    }
+}
+
+/// A slim bar that fills as the update downloads.
+private struct UpdateProgress: View {
+    let fraction: Double
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.1))
+                Capsule().fill(Palette.blue.gradient).frame(width: max(6, geo.size.width * min(max(fraction, 0), 1)))
+            }
+        }
+        .frame(height: 5)
+        .animation(.easeOut(duration: 0.25), value: fraction)
+    }
 }
 
 // MARK: - Icon

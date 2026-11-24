@@ -18,6 +18,7 @@ import Combine
     private var keepAwakeItem: NSMenuItem?
     private var timerItem: NSMenuItem?
     private var clearItem: NSMenuItem?
+    private var updateItem: NSMenuItem?
     private var settingsWatch: AnyCancellable?
     private var statusItem: NSStatusItem?
     private var statusIcon: StatusIcon?
@@ -38,6 +39,7 @@ import Combine
         startPullRequests(for: model)
         startBuilds(for: model)
         startLoad(for: model)
+        startUpdates(for: model)
         model.openCustomiser = { [weak self] in self?.openCustomiser() }
         model.openClaudeSession = { [weak self] session in self?.claude?.open(session: session) }
         setUpStatusItem()
@@ -149,6 +151,31 @@ import Combine
         jenkins.start()
     }
 
+    /// New versions from GitHub: a banner when one appears, Update in Customise › About, and
+    /// "Updated to …" once the new one is running.
+    private func startUpdates(for model: NotchModel) {
+        let updater = Updater.shared
+        updater.isAway = { [weak self] in !(self?.prs.away.isEmpty ?? true) }
+        updater.onFound = { [weak model] release in
+            model?.show(Banner(symbol: "arrow.down.circle.fill", tint: .green, title: "Notch \(release.version) is available",
+                               subtitle: "Update in Customise › About", duration: 7))
+        }
+        if let current = updater.currentVersion {
+            let before = SettingsStore.shared.value.lastRunVersion
+            if !before.isEmpty, Updater.isNewer(current, than: before) {
+                log("update: now running \(current) (was \(before))")
+                model.show(Banner(symbol: "checkmark.seal.fill", tint: .green, title: "Updated to Notch \(current)",
+                                  subtitle: "What's new is in Customise › About", duration: 6))
+            }
+            if before != current { SettingsStore.shared.value.lastRunVersion = current }
+        }
+        updater.start()
+    }
+
+    @objc private func openUpdates() {
+        customiser?.show(pane: .about)
+    }
+
     /// CPU & memory, live: the pill (always or when busy) and its page in the open island.
     private func startLoad(for model: NotchModel) {
         load.isAway = { [weak self] in !(self?.prs.away.isEmpty ?? true) }
@@ -174,6 +201,10 @@ import Combine
         let waiting = (model?.claudeWaits.count ?? 0) + (model?.claudeUpdates.count ?? 0) + (model?.prUpdates.count ?? 0)
         clearItem?.isEnabled = waiting > 0
         clearItem?.title = waiting > 0 ? "Clear \(waiting) Update\(waiting == 1 ? "" : "s")" : "Clear Updates"
+        // A new version of Notch: say which, and open where you can install it.
+        let release = Updater.shared.hasUpdate ? Updater.shared.available : nil
+        updateItem?.isHidden = release == nil
+        updateItem?.title = release.map { "Update to Notch \($0.version)…" } ?? "Update Notch…"
     }
 
     /// Browser tabs (via ChromeExtension/) and the Spotify / Apple Music apps. Controls go
@@ -336,6 +367,10 @@ import Combine
         let clear = menuItem("Clear Updates", #selector(clearUpdates))
         menu.addItem(clear)
         clearItem = clear
+        let update = menuItem("Update Notch…", #selector(openUpdates))
+        update.isHidden = true
+        menu.addItem(update)
+        updateItem = update
         menu.addItem(.separator())
         menu.addItem(menuItem("Quit Notch", #selector(quit), key: "q"))
         menu.delegate = self

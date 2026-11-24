@@ -30,5 +30,7 @@
 	<string>Notch shows your next meeting with a countdown and a Join button. Your calendar never leaves this Mac.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NotchUpdateRepo</key>
+	<string>devaduttmohan/notch</string>
 </dict>
 </plist>
