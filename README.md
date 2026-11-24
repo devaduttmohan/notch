@@ -414,6 +414,13 @@ need to refresh them.
 - *Notch started while something plays:* pages with media check in every ~4 s,
   which wakes the extension and reconnects to Notch within a few seconds.
 
+**Video thumbnails:** the site's Media Session artwork; for a video without one,
+its poster, or the page's share image (`og:image` / `twitter:image`), https only.
+A video (a `<video>` with a picture, not sound only) shows its still wide in the
+pill and the open island, with the still blurred behind the open island; with no
+picture, a film icon. Square art stays square. Some sites (JioHotstar, for one)
+give none of these, and protected video can't be captured, so they get the icon.
+
 **Seek slider:** when the site reports a duration (Media Session
 `setPositionState`, or the `<audio>/<video>` element), the open panel grows a
 little and shows elapsed / remaining time and a bar you can drag. The playhead
