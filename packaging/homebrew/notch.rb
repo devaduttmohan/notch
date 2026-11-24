@@ -21,18 +21,20 @@ cask "notch" do
   app "Notch.app"
   binary "#{appdir}/Notch.app/Contents/MacOS/notchctl"
 
-  # Signed locally (ad hoc) rather than notarised: without this, macOS won't open it. (A
-  # custom --appdir skips it; then right-click Notch › Open the first time.)
+  # Signed locally (ad hoc) rather than notarised: without this, macOS won't open it.
   postflight_steps do
-    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "/Applications/Notch.app"], must_succeed: false
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/Notch.app"], must_succeed: false
   end
 
-  uninstall quit:       "dev.notch.Notch",
-            login_item: "Notch"
+  # Notch's login item is an SMAppService one: macOS drops it with the app. (Homebrew's
+  # login_item: only reaches the old System Events list, and would ask for Automation access.)
+  uninstall quit: "dev.notch.Notch"
 
   zap trash: [
     "~/Library/Application Support/Notch",
     "~/Library/Caches/dev.notch.Notch",
+    "~/Library/HTTPStorages/dev.notch.Notch",
     "~/Library/Logs/Notch.log",
+    "~/Library/Preferences/dev.notch.Notch.plist",
   ]
 end

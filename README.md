@@ -22,27 +22,60 @@ highlights, **What's new** and **Update**; the sidebar gets a dot, the menu bar 
 "Update to Notch x.y.z…" item, and a banner says so once. Notch looks at GitHub's public
 releases API about 20 s after starting, every 6 hours, when you open About, or on **Check
 now** (no sign-in; an ETag makes an unchanged answer nearly free; nothing while you're away;
-switch it off with **Check automatically**). **Update** downloads the zip (with progress),
-checks it against the SHA-256 GitHub publishes for it, unzips it, and checks the app: its
-bundle ID, its version, a valid signature, and the same signing identity as every Notch
-build. Then Notch quits; a small helper puts the new app where the old one was (Applications
-or Homebrew's), starts it and removes the old one. Anything wrong, nothing is replaced; if
-the swap itself fails, the old app goes back. Settings, Calendar access, the login item and
-the Jenkins token all carry over. A banner says "Updated to Notch x.y.z" once it's running.
-The Homebrew cask is `auto_updates true`, so Homebrew leaves updating to Notch
-(`brew upgrade --greedy` still works).
+switch it off with **Check automatically**).
+
+**Update** first makes sure Notch can write next to itself (and clears what an earlier update
+left there), then downloads the zip (with progress), checks it against the SHA-256 GitHub
+publishes for it, unzips it, and checks the app: its bundle ID, its version, a valid
+signature, that it's signed as Notch, that it's built for this Mac's processor, and that this
+macOS is new enough for it. Those catch a broken or wrong download; the trust itself comes
+from GitHub (over HTTPS) and its checksum, since Notch is signed locally rather than with an
+Apple Developer ID. Then Notch quits; a small helper copies the new app next to the old one,
+swaps the two, starts it, and keeps the old one until the new one has been running for 3 s.
+Anything wrong, nothing is replaced; if the new version doesn't start, the old one goes back.
+A failure is reported after the restart (a banner and the About card); a success with
+"Updated to Notch x.y.z" and what's new. Settings, Calendar access, the login item and the
+Jenkins token all carry over. The Homebrew cask is `auto_updates true`, so Homebrew leaves
+updating to Notch (`brew upgrade --greedy` still works).
+
+Copies that don't update themselves, with the reason in About: a build from source
+(`build/Notch.app` in a checkout, or `swift run`), a copy macOS runs from a temporary place
+(App Translocation; move it with Finder), and a copy in Downloads, Desktop or Documents
+(privacy-protected folders, where the helper may lose access once Notch has quit).
+
+Known limits:
+- The helper's "another copy is running" check only sees your own processes started by path;
+  two people running the same `/Applications/Notch.app` at once can still get in each other's
+  way.
+- Removable, network and iCloud volumes aren't refused up front like Downloads; if the helper
+  is refused there, the update fails safely (the old app stays and is restarted).
+- A 0.7.2 copy in Downloads, Desktop or Documents can still be updated once (by 0.7.2's own
+  helper); after that it says to move it to Applications, without an "Updated to" banner.
+- A rare rollback fallback (`Notch.app.failed.<pid>`) isn't cleaned up automatically, and a
+  dangling symlink named `Notch.app.incoming` is reported as "can't write here".
 
 ## Releasing
 
 ```sh
-bin/release 0.7.2            # notes from build/release/notes-0.7.2.md
+CO_AUTHOR="Name <email>" bin/release 0.7.3 [notes.md] [--no-install]   # notes default: build/release/notes-0.7.3.md
 ```
 
-Sets the version and pushes it, builds and zips Notch.app and checks the zip (signature,
-version, `notchctl` inside), publishes the GitHub release with the notes and checks
-GitHub's checksum matches, updates the Homebrew cask in the tap (`../homebrew-tap`, or
-`TAP_DIR`) and pushes it, then reinstalls the new version on this Mac. The cask's template
-is `packaging/homebrew/notch.rb`.
+Checks first (clean main, notes there, no such tag or release here or on GitHub, gh answering),
+then sets the version, builds and zips Notch.app and checks the zip (signature, signed as
+Notch, version, Apple silicon, `notchctl` inside); anything wrong puts Info.plist back with
+nothing committed. Then it commits and pushes the version, uploads the release as a draft,
+waits for GitHub's checksum of the zip and checks it matches, publishes it (tagged on the
+commit that was built), updates the Homebrew cask in the tap (`../homebrew-tap`, or `TAP_DIR`)
+and pushes it, and reinstalls here unless `--no-install`. GitHub calls after the upload are
+retried. If it stops after the push but before the upload, run it again: it carries on. The
+cask's template is `packaging/homebrew/notch.rb`.
+
+Known limits: a few failure messages after the upload can give imperfect advice (a draft that
+never shows in GitHub's list reads as a network failure; if reading the checksum keeps failing
+it suggests checking the draft and publishing, though the checksum wasn't compared; if
+publishing went through but every reply was lost and the follow-up check fails too, it says to
+delete a release that is already published). When in doubt, look at the release on GitHub
+before acting on the message.
 
 ## Run
 
