@@ -125,7 +125,17 @@ apply instantly and save to `~/Library/Application Support/Notch/settings.json`.
 - **Motion:** personality (Snappy, Smooth, Bouncy, Gentle) bends every spring;
   speed 0.6–1.6×; content effect (blur, zoom, fade); Reduce Motion.
 - **Behaviour:** open on hover, hover and hold (it swells first), or click;
-  haptics; sounds; which display; open at login.
+  **Alerts**; haptics; sounds; which display; open at login.
+- **Alerts:** for Claude Code, pull requests, Flock reviews, Jenkins builds and
+  commands, each on its own: **Until seen** (on the notch until you've looked at it
+  in the open island; a command's until you open the island after it showed) or
+  **Hide after** 3 s to 2 min, or Auto (each alert's usual 4–7 s) for PRs, builds
+  and commands. A Claude or Flock update counts its seconds only while it's the
+  banner on the notch and you're there (not behind another banner or "Claude needs
+  you", not while the island is open or the pointer rests on it, not while the
+  screen is locked or asleep); then it, and any older news set to hide, waits unread
+  in the open island. PR, build and command alerts set to hide pass like any banner.
+  Defaults are as before: Claude and Flock stay; PRs, builds and commands Auto.
 - **Modules:** switch Now Playing, Meetings, Claude Code, command alerts, timers,
   battery and headphones on or off.
 - **Meetings:** calendar access, which calendars, when the pill appears, time left,
