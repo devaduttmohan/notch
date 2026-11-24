@@ -253,7 +253,7 @@ struct NotchView: View {
                 .padding(.horizontal, 18)
                 .frame(height: notch.height)
                 ExpandedContent(model: model, activity: model.expandedActivity,
-                                openPR: model.prSummary.flatMap(model.openPRRow), ns: ns)
+                                openPR: model.prSummary.flatMap(model.openPRRow), copyMenu: model.copyMenuPR, ns: ns)
                     .id(current)                          // a new page slides in, the old one out
                     .transition(PageTransition(step: model.pageStep))
                     .padding(.horizontal, 22)
@@ -502,6 +502,7 @@ private struct ExpandedContent: View {
     let model: NotchModel
     let activity: Activity?
     let openPR: String?            // an input, so opening a row redraws this (the model alone doesn't)
+    var copyMenu: String? = nil    // the same for a row's Copy ▾ list
     let ns: Namespace.ID
 
     var body: some View {
@@ -518,6 +519,7 @@ private struct ExpandedContent: View {
             }
         case let .pullRequests(summary):
             PRsExpanded(summary: summary, open: openPR, toggle: { model.togglePR($0) },
+                        copyMenu: copyMenu, toggleCopy: { model.copyMenuPR = $0 },
                         measured: { height in
                             if abs(model.prContentHeight - height) > 0.5 { model.prContentHeight = height }
                         }) { action in

@@ -40,6 +40,10 @@ final class NotchHostingView<Content: View>: NSHostingView<Content> {
     let model: NotchModel
     private let panel: NotchPanel
     private var monitors: [Any] = []
+    /// A menu of ours is open (a PR row's right-click menu): the pointer can wander off the
+    /// island into it without closing the island under it.
+    private var menuOpen = false
+    private var menuObservers: [any NSObjectProtocol] = []
     private var observers: [any NSObjectProtocol] = []
     private var followingCurrentSpace = false
     private var holdTimer: DispatchWorkItem?
@@ -76,6 +80,14 @@ final class NotchHostingView<Content: View>: NSHostingView<Content> {
             MainActor.assumeIsolated { self?.mouseMoved() }
             return event
         }) { monitors.append(local) }
+        for (name, open) in [(NSMenu.didBeginTrackingNotification, true), (NSMenu.didEndTrackingNotification, false)] {
+            menuObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.menuOpen = open
+                    if !open { self?.mouseMoved() }          // chose or dismissed: close if the pointer is away
+                }
+            })
+        }
         // Two-finger swipe across the open island turns its pages.
         if let scroll = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel, handler: { [weak self] event in
             MainActor.assumeIsolated { self?.scrolled(event) }
@@ -158,7 +170,7 @@ final class NotchHostingView<Content: View>: NSHostingView<Content> {
         // The zone to leave is bigger than the zone to enter, so the edge doesn't flicker.
         if model.hovering {
             let zone = layout.screenRect(for: .expanded, kind: model.expandedKind).insetBy(dx: -12, dy: -12)
-            if !zone.contains(point) { close() }
+            if !zone.contains(point), !menuOpen { close() }
             return
         }
         let onPill = layout.screenRect(for: model.restingState).insetBy(dx: -6, dy: -6).contains(point)

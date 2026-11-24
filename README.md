@@ -94,8 +94,11 @@ ones summed up as "+6 older"). "Approved" means a person approved and every chec
 hatch/flock-review, passes (Flock's own approval doesn't count). Rows show open Flock
 comment threads. The island grows or shrinks to fit the list. **Flock's news is sticky**,
 like Claude's: it stays on the notch until you've looked at the PR page. A row opens
-to show failed checks, the latest word, **Open** and **Re-run failed** (GitHub Actions) or
-**Details** (hatch checks). Looking at the page for half a second marks things seen.
+to show failed checks, the latest word, and **Open**, **Details** (the failed check's page,
+or the PR's checks) and **Copy ▾**: the link, the title and link (rich text, so Slack, Jira,
+Notion and Mail paste the title as a link; plain text elsewhere), the branch name, or
+Markdown. A failed GitHub Actions run adds a re-run button. Right-click any row for the
+same choices. Looking at the page for half a second marks things seen.
 
 Customise › Modules › Pull requests shows the GitHub account gh is signed in as (picture,
 name, @login). **Sign in with GitHub** runs gh's own browser sign-in: Notch shows the

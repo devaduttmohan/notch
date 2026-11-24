@@ -118,6 +118,8 @@ import Combine
             switch action {
             case .open(let url): NSWorkspace.shared.open(url)
             case .rerun(let check, let pr): self?.prs.rerun(check, in: pr)
+            case .details(let pr):
+                NSWorkspace.shared.open(pr.failedChecks.first?.url ?? pr.url.appendingPathComponent("checks"))
             }
         }
         model.prsSeen = { [weak self] in self?.prs.markSeen() }

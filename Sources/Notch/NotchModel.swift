@@ -217,6 +217,8 @@ struct PRUpdate: Equatable, Identifiable {
 enum PRAction {
     case open(URL)
     case rerun(PullRequest.Check, PullRequest)
+    /// The failed check's page if one failed, otherwise the PR's checks.
+    case details(PullRequest)
 }
 
 /// The kinds of thing the island shows; the open island has a page for each one that's live.
@@ -311,6 +313,7 @@ enum Activity: Equatable {
                 page = nil
                 openPR = nil
                 openPRChosen = false
+                copyMenuPR = nil
             }
         }
     }
@@ -514,7 +517,11 @@ enum Activity: Equatable {
         let current = prSummary.flatMap(openPRRow)
         openPR = current == id ? nil : id
         openPRChosen = true
+        copyMenuPR = nil
     }
+
+    /// The open row whose Copy ▾ list is showing.
+    @Published var copyMenuPR: String?
 
     /// Which way the last page change went (+1 forward, -1 back), so pages slide the right way.
     @Published private(set) var pageStep = 1

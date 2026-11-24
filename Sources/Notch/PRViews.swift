@@ -157,6 +157,8 @@ struct PRsExpanded: View {
     let summary: PRSummary
     let open: String?                      // the open row (the model keeps it, so the island can grow to fit)
     let toggle: (String) -> Void
+    var copyMenu: String? = nil            // the row whose Copy ▾ list is open
+    var toggleCopy: (String?) -> Void = { _ in }
     var measured: (CGFloat) -> Void = { _ in }
     let act: (PRAction) -> Void
 
@@ -180,7 +182,8 @@ struct PRsExpanded: View {
                 .foregroundStyle(.secondary)
             }
             ForEach(visible) { pr in
-                PRRow(pr: pr, summary: summary, opened: pr.id == open, act: act) {
+                PRRow(pr: pr, summary: summary, opened: pr.id == open, copyOpen: pr.id == open && pr.id == copyMenu,
+                      setCopyOpen: { open in toggleCopy(open ? pr.id : nil) }, act: act) {
                     withAnimation(Motion.animation(Motion.contentSwap)) { toggle(pr.id) }
                 }
             }
@@ -219,8 +222,27 @@ private struct PRRow: View {
     let pr: PullRequest
     let summary: PRSummary
     let opened: Bool
+    /// The Copy ▾ list under the buttons (the model keeps it, so the island grows to fit and it
+    /// closes with the island).
+    let copyOpen: Bool
+    let setCopyOpen: (Bool) -> Void
     let act: (PRAction) -> Void
     let toggle: () -> Void
+    /// What was just copied: the button says so for a moment.
+    private let copied = State<PRCopyFormat?>(initialValue: nil)
+
+    private func copy(_ format: PRCopyFormat) {
+        PRCopy.copy(format, pr)
+        Haptics.tap(.generic)
+        withAnimation(Motion.animation(Motion.contentSwap)) {
+            setCopyOpen(false)
+            copied.wrappedValue = format
+        }
+        let shown = copied
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            withAnimation(Motion.animation(Motion.contentSwap)) { if shown.wrappedValue == format { shown.wrappedValue = nil } }
+        }
+    }
 
     var body: some View {
         let new = summary.unseen.contains(pr.id)
@@ -270,16 +292,32 @@ private struct PRRow: View {
                     }
                     HStack(spacing: 6) {
                         PillButton(symbol: "arrow.up.right", title: "Open") { act(.open(pr.url)) }
-                        if let failed = pr.failedChecks.first {
-                            PillButton(symbol: failed.url?.absoluteString.contains("/actions/runs/") == true ? "arrow.clockwise" : "doc.text.magnifyingglass",
-                                       title: failed.url?.absoluteString.contains("/actions/runs/") == true ? "Re-run failed" : "Details") {
-                                act(.rerun(failed, pr))
-                            }
+                        PillButton(symbol: "doc.text.magnifyingglass", title: "Details") { act(.details(pr)) }
+                            .help(pr.failedChecks.first.map { "\($0.name): the failed check's page" } ?? "The PR's checks")
+                        CopyButton(open: copyOpen, copied: copied.wrappedValue) {
+                            withAnimation(Motion.animation(Motion.contentSwap)) { setCopyOpen(!copyOpen) }
                         }
+                        // A failed GitHub Actions run can be re-run from here.
+                        if let failed = pr.failedChecks.first, failed.url?.absoluteString.contains("/actions/runs/") == true {
+                            IconButton(symbol: "arrow.clockwise", label: "Re-run failed jobs", size: 28) { act(.rerun(failed, pr)) }
+                        }
+                    }
+                    if copyOpen {
+                        CopyMenu(pr: pr) { format in copy(format) }
+                            .transition(.blurReplace.combined(with: .scale(0.96, anchor: .topLeading)))
                     }
                 }
                 .padding(.leading, 28)
                 .transition(.blurReplace)
+            }
+        }
+        // Right-click any row (open or not) for the same choices.
+        .contextMenu {
+            Button { act(.open(pr.url)) } label: { Label("Open on GitHub", systemImage: "arrow.up.right") }
+            Button { act(.details(pr)) } label: { Label("Details", systemImage: "doc.text.magnifyingglass") }
+            Divider()
+            ForEach(PRCopyFormat.available(for: pr)) { format in
+                Button { copy(format) } label: { Label(format.menuTitle, systemImage: format.symbol) }
             }
         }
         .padding(.horizontal, 10)
@@ -335,5 +373,87 @@ private struct PRRow: View {
         if others > 0 { return "\(others) other open review thread\(others == 1 ? "" : "s")" }
         if !pr.approvers.isEmpty, !pr.approved { return "Approved by \(pr.approvers.joined(separator: ", ")), waiting on checks" }
         return nil
+    }
+}
+
+/// Copy ▾ in an open PR row: opens the list of formats; for a moment after copying it reads
+/// "✓ Copied" in green.
+private struct CopyButton: View {
+    let open: Bool
+    let copied: PRCopyFormat?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                SymbolImage(copied == nil ? "doc.on.doc" : "checkmark", size: 11, weight: .bold)
+                    .contentTransition(.symbolEffect(.replace))
+                Text(copied == nil ? "Copy" : "Copied")
+                    .contentTransition(.interpolate)
+                if copied == nil {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .heavy))
+                        .rotationEffect(.degrees(open ? 180 : 0))
+                        .transition(.blurReplace)
+                }
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(copied == nil ? Color.white : Color.green)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(copied == nil ? Color.white.opacity(open ? 0.22 : 0.14) : Color.green.opacity(0.2)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressableStyle())
+        .animation(Motion.animation(Motion.contentSwap), value: copied)
+        .animation(Motion.animation(Motion.contentSwap), value: open)
+        .help(copied.map { "Copied the \($0.title.lowercased())" } ?? "Copy the link, title, branch or Markdown")
+    }
+}
+
+/// The formats, each with what it will copy underneath. Part of the row (the island grows to
+/// fit), so it never hangs over the rows below or off the island's edge.
+private struct CopyMenu: View {
+    let pr: PullRequest
+    let pick: (PRCopyFormat) -> Void
+
+    var body: some View {
+        VStack(spacing: 1) {
+            ForEach(PRCopyFormat.available(for: pr)) { format in
+                CopyMenuItem(format: format, preview: PRCopy.preview(format, pr)) { pick(format) }
+            }
+        }
+        .padding(4)
+        .frame(maxWidth: 330, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 0.6))
+    }
+}
+
+private struct CopyMenuItem: View {
+    let format: PRCopyFormat
+    let preview: String
+    let action: () -> Void
+    private let hovered = State(initialValue: false)
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                SymbolImage(format.symbol, size: 11, weight: .semibold)
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(format.title).font(.system(size: 12, weight: .semibold))
+                    Text(preview).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(hovered.wrappedValue ? 0.12 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle())
+        .onHover { inside in withAnimation(.easeOut(duration: 0.12)) { hovered.wrappedValue = inside } }
     }
 }
