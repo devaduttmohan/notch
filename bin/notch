@@ -1,0 +1,83 @@
+#!/bin/bash
+# Builds Notch.app, (re)starts it, and follows its log here.
+#
+#   bin/notch                    build, restart, follow the log (Ctrl-C stops following, not the app)
+#   bin/notch --demo meeting     extra flags go to the app
+#   bin/notch --debug            a debug build (faster to compile, slower to run)
+#   bin/notch --build-only       build the app and stop
+#   bin/notch --install          also install it into /Applications (once; after that every
+#                                build updates the installed copy and runs it from there)
+#   bin/notch --quit             quit the running app
+#
+# The app is built in build/Notch.app. Once installed, each build replaces
+# /Applications/Notch.app and the build copy is removed, so there's only ever one Notch (for
+# Spotlight, and for "Open at login", which the app moves to wherever it runs from). It's
+# signed locally ("ad hoc") with a fixed identity, so macOS remembers its permissions
+# (Calendar, Automation) across rebuilds and the move.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+ROOT="$PWD"
+APP="$ROOT/build/Notch.app"
+LOG="$HOME/Library/Logs/Notch.log"
+ID="dev.notch.Notch"
+INSTALLED="/Applications/Notch.app"
+
+config=release; follow=1; launch=1; install=0; args=()
+for arg in "$@"; do
+  case "$arg" in
+    --debug) config=debug ;;
+    --release) config=release ;;
+    --build-only) launch=0; follow=0 ;;
+    --install) install=1 ;;
+    --no-log) follow=0 ;;
+    --quit) pkill -x Notch && echo "Notch quit." || echo "Notch wasn't running."; exit 0 ;;
+    *) args+=("$arg") ;;
+  esac
+done
+
+echo "Building Notch ($config)…"
+swift build -c "$config" 2>&1 | grep -v "search path" | grep -E "error|warning: |Compiling|Build" || true
+BIN="$(swift build -c "$config" --show-bin-path)/Notch"
+[ -x "$BIN" ] || { echo "Build failed."; exit 1; }
+
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+cp "$BIN" "$APP/Contents/MacOS/Notch"
+
+# The icon, drawn by the app itself (Sources/Notch/CustomiserView.swift, AppIconArt).
+ICONSET="$ROOT/build/Notch.iconset"
+if [ ! -f "$APP/Contents/Resources/Notch.icns" ] || [ "$ROOT/Sources/Notch/CustomiserView.swift" -nt "$APP/Contents/Resources/Notch.icns" ]; then
+  rm -rf "$ICONSET"
+  "$BIN" --write-iconset "$ICONSET" >/dev/null
+  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Notch.icns"
+  rm -rf "$ICONSET"
+fi
+
+# Ad-hoc signature that names the app rather than this exact build, so permissions stick.
+codesign --force --sign - --identifier "$ID" --requirements "=designated => identifier \"$ID\"" "$APP" 2>/dev/null \
+  || codesign --force --sign - --identifier "$ID" "$APP"
+touch "$APP"
+echo "Built $APP"
+
+[ "$launch" = 1 ] || exit 0
+if pgrep -x Notch >/dev/null; then
+  pkill -x Notch || true
+  for _ in $(seq 1 30); do pgrep -x Notch >/dev/null || break; sleep 0.1; done
+fi
+RUN="$APP"
+if [ "$install" = 1 ] || [ -d "$INSTALLED" ]; then
+  rm -rf "$INSTALLED.new"
+  ditto "$APP" "$INSTALLED.new"
+  rm -rf "$INSTALLED"
+  mv "$INSTALLED.new" "$INSTALLED"
+  rm -rf "$APP"
+  RUN="$INSTALLED"
+  echo "Installed $INSTALLED"
+fi
+touch "$LOG"
+open "$RUN" --args ${args[@]+"${args[@]}"}
+echo "Notch is running."
+if [ "$follow" = 1 ]; then
+  echo "Following $LOG (Ctrl-C stops following; Notch keeps running)"
+  exec tail -n 0 -F "$LOG"
+fi
