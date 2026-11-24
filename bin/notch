@@ -36,7 +36,16 @@ for arg in "$@"; do
 done
 
 echo "Building Notch ($config)…"
-swift build -c "$config" 2>&1 | grep -v "search path" | grep -E "error|warning: |Compiling|Build" || true
+# A failed compile must stop here: carrying on would package the previous build's binary.
+BUILDLOG="$(mktemp)"
+if ! swift build -c "$config" > "$BUILDLOG" 2>&1; then
+  grep -v "search path" "$BUILDLOG" | grep -E "error" || tail -20 "$BUILDLOG"
+  rm -f "$BUILDLOG"
+  echo "Build failed."
+  exit 1
+fi
+grep -v "search path" "$BUILDLOG" | grep -E "error|warning: |Compiling|Build" || true
+rm -f "$BUILDLOG"
 BIN="$(swift build -c "$config" --show-bin-path)/Notch"
 [ -x "$BIN" ] || { echo "Build failed."; exit 1; }
 
@@ -46,10 +55,11 @@ cp "$BIN" "$APP/Contents/MacOS/Notch"
 # notchctl rides along inside the app (Homebrew links it onto your PATH; updates replace it
 # with the app). Signed on its own first, so the app's signature covers a signed helper.
 CTL="$(dirname "$BIN")/notchctl"
-if [ -x "$CTL" ]; then
-  cp "$CTL" "$APP/Contents/MacOS/notchctl"
-  codesign --force --sign - --identifier "dev.notch.notchctl" "$APP/Contents/MacOS/notchctl" 2>/dev/null
-fi
+rm -f "$APP/Contents/MacOS/notchctl"                      # never a stale one from an earlier build
+[ -x "$CTL" ] || { echo "notchctl wasn't built."; exit 1; }
+cp "$CTL" "$APP/Contents/MacOS/notchctl"
+SIGNED="$(codesign --force --sign - --identifier "dev.notch.notchctl" "$APP/Contents/MacOS/notchctl" 2>&1)" \
+  || { echo "$SIGNED"; echo "Couldn't sign notchctl."; exit 1; }
 
 # The icon, drawn by the app itself (Sources/Notch/CustomiserView.swift, AppIconArt).
 ICONSET="$ROOT/build/Notch.iconset"
@@ -61,8 +71,10 @@ if [ ! -f "$APP/Contents/Resources/Notch.icns" ] || [ "$ROOT/Sources/Notch/Custo
 fi
 
 # Ad-hoc signature that names the app rather than this exact build, so permissions stick.
-codesign --force --sign - --identifier "$ID" --requirements "=designated => identifier \"$ID\"" "$APP" 2>/dev/null \
-  || codesign --force --sign - --identifier "$ID" "$APP"
+if ! codesign --force --sign - --identifier "$ID" --requirements "=designated => identifier \"$ID\"" "$APP" 2>/dev/null; then
+  echo "Warning: signed without Notch's fixed identity: permissions won't stick, and the in-app updater refuses such a build"
+  codesign --force --sign - --identifier "$ID" "$APP"
+fi
 touch "$APP"
 echo "Built $APP"
 
