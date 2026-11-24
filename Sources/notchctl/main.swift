@@ -110,9 +110,7 @@ case "run":
 case "claude":
     let input = FileHandle.standardInput.readDataToEndOfFile()
     if let hook = try? JSONSerialization.jsonObject(with: input) as? [String: Any] {
-        // Only what Notch uses; tool inputs and outputs can be large.
-        let keep = ["hook_event_name", "session_id", "cwd", "transcript_path", "message", "reason"]
-        var message: [String: Any] = ["type": "claude", "hook": hook.filter { keep.contains($0.key) }, "ancestors": ancestors()]
+        var message: [String: Any] = ["type": "claude", "hook": HookForward.hook(hook), "ancestors": ancestors()]
         // A session the Claude app started carries the app's own ID for it ("local_…"), which
         // its claude://code/continue link opens. Only that exact shape is passed on.
         if let app = ProcessInfo.processInfo.environment["CLAUDE_CODE_HOST_SESSION_ID"],

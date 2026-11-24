@@ -1,11 +1,15 @@
 #!/bin/sh
 # Stable path to notchctl for scripts and Claude Code hooks; runs the built binary.
 here="$(cd "$(dirname "$0")/.." && pwd)"
+# The newest copy wins, so an old debug build can't shadow a newer release or installed app.
+newest=""
 for bin in "$here/.build/out/Products/Debug/notchctl" "$here/.build/debug/notchctl" \
            "$here/.build/out/Products/Release/notchctl" "$here/.build/release/notchctl" \
            "/Applications/Notch.app/Contents/MacOS/notchctl"; do
-  [ -x "$bin" ] && exec "$bin" "$@"
+  [ -x "$bin" ] || continue
+  if [ -z "$newest" ] || [ "$bin" -nt "$newest" ]; then newest="$bin"; fi
 done
+[ -n "$newest" ] && exec "$newest" "$@"
 # Not built yet: never break the caller. `run` still runs the command.
 if [ "$1" = run ]; then shift; [ "$1" = -- ] && shift; exec "$@"; fi
 exit 0
