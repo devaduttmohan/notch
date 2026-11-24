@@ -1585,6 +1585,10 @@ struct AboutPane: View {
                         Text("A Dynamic Island for your Mac. Everything runs on this Mac; nothing is sent anywhere.")
                             .font(.system(size: 12)).foregroundStyle(Palette.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                        Text("Created by Devadutt Mohan")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Color.white.opacity(0.78))
+                            .padding(.top, 4)
                     }
                 }
             }
