@@ -4,6 +4,46 @@ A Dynamic Island–style overlay for the MacBook notch. A borderless, click-thro
 `NSPanel` sits above the menu bar, and SwiftUI draws a black shape that grows out
 of the physical notch.
 
+## Install
+
+```sh
+brew install --cask devaduttmohan/tap/notch
+```
+
+Homebrew installs Notch.app and puts `notchctl` on your PATH (it lives inside the app). Or
+download `Notch-x.y.z.zip` from the [releases](https://github.com/devaduttmohan/notch/releases),
+unzip it into Applications and right-click › Open the first time (the app is signed locally,
+not notarised). Apple silicon, macOS 14 or later.
+
+## Updates
+
+Customise › About shows whether Notch is up to date and, when a newer release is out, its
+highlights, **What's new** and **Update**; the sidebar gets a dot, the menu bar menu an
+"Update to Notch x.y.z…" item, and a banner says so once. Notch looks at GitHub's public
+releases API about 20 s after starting, every 6 hours, when you open About, or on **Check
+now** (no sign-in; an ETag makes an unchanged answer nearly free; nothing while you're away;
+switch it off with **Check automatically**). **Update** downloads the zip (with progress),
+checks it against the SHA-256 GitHub publishes for it, unzips it, and checks the app: its
+bundle ID, its version, a valid signature, and the same signing identity as every Notch
+build. Then Notch quits; a small helper puts the new app where the old one was (Applications
+or Homebrew's), starts it and removes the old one. Anything wrong, nothing is replaced; if
+the swap itself fails, the old app goes back. Settings, Calendar access, the login item and
+the Jenkins token all carry over. A banner says "Updated to Notch x.y.z" once it's running.
+The Homebrew cask is `auto_updates true`, so Homebrew leaves updating to Notch
+(`brew upgrade --greedy` still works).
+
+## Releasing
+
+```sh
+bin/release 0.7.2            # notes from build/release/notes-0.7.2.md
+```
+
+Sets the version and pushes it, builds and zips Notch.app and checks the zip (signature,
+version, `notchctl` inside), publishes the GitHub release with the notes and checks
+GitHub's checksum matches, updates the Homebrew cask in the tap (`../homebrew-tap`, or
+`TAP_DIR`) and pushes it, then reinstalls the new version on this Mac. The cask's template
+is `packaging/homebrew/notch.rb`.
+
 ## Run
 
 ```sh
@@ -386,6 +426,7 @@ need their own route (not built yet).
 | `SystemMonitor.swift` + `ProcessViews.swift` | runaway processes, low disk, heat; their pill and panel |
 | `LoadMonitor.swift` + `LoadViews.swift` | CPU & memory, live: the sampler with busy/calm, its pill and page |
 | `PRCopy.swift` | what Copy puts on the clipboard for a PR (link, rich title and link, branch, Markdown) |
+| `Updater.swift` | new releases from GitHub: check, download, verify, swap in, restart (Customise › About) |
 | `KeepAwake.swift` | the idle-sleep assertion and its reasons |
 | `GitHub.swift` + `PRViews.swift` | PR watcher (gh GraphQL), change detection, banners; pill, bubble, tabs, PR page |
 | `GitHubAccount.swift` | the gh account: who's signed in, browser sign-in, switching |

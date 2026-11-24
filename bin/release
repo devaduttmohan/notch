@@ -1,0 +1,86 @@
+#!/bin/bash
+# Publishes a new version of Notch, start to finish:
+#
+#   bin/release 0.7.2                 notes from build/release/notes-0.7.2.md
+#   bin/release 0.7.2 path/to/notes.md
+#   bin/release 0.7.2 --no-install   leave this Mac's copy alone (to try the in-app update)
+#
+#   1. sets the version in Resources/Info.plist (build number + 1), commits "Version 0.7.2", pushes
+#   2. builds Notch.app, zips it, unzips the zip and checks it (signature, version, notchctl inside)
+#   3. publishes the GitHub release with the notes, the zip and the Chrome extension zip
+#   4. updates the Homebrew cask (packaging/homebrew/notch.rb) in the tap and pushes it
+#      (TAP_DIR, default ../homebrew-tap; skipped with a note if it isn't there)
+#   5. reinstalls the new version here (bin/notch)
+#
+# Stops at the first thing that goes wrong. Needs a clean main branch and gh signed in.
+# CO_AUTHOR="Name <email>" adds a Co-Authored-By line to the commits it makes.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+ROOT="$PWD"
+INSTALL=1; POSITIONAL=()
+for arg in "$@"; do
+  case "$arg" in
+    --no-install) INSTALL=0 ;;
+    *) POSITIONAL+=("$arg") ;;
+  esac
+done
+VERSION="${POSITIONAL[0]:?usage: bin/release <version> [notes.md] [--no-install]}"
+NOTES="${POSITIONAL[1]:-build/release/notes-$VERSION.md}"
+TRAILER=(); [ -n "${CO_AUTHOR:-}" ] && TRAILER=(-m "Co-Authored-By: $CO_AUTHOR")
+TAP_DIR="${TAP_DIR:-$ROOT/../homebrew-tap}"
+PLIST="Resources/Info.plist"
+REPO="$(/usr/libexec/PlistBuddy -c "Print :NotchUpdateRepo" "$PLIST")"
+ZIP="build/release/Notch-$VERSION.zip"
+
+[[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]] || { echo "Version should look like 0.7.2, not $VERSION"; exit 1; }
+[ -f "$NOTES" ] || { echo "No release notes at $NOTES"; exit 1; }
+[ "$(git branch --show-current)" = main ] || { echo "Releases come from main"; exit 1; }
+[ -z "$(git status --porcelain)" ] || { echo "Commit or stash your changes first"; exit 1; }
+git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null && { echo "v$VERSION already exists"; exit 1; }
+CURRENT="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST")"
+BUILD="$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST")"
+echo "Releasing Notch $VERSION (was $CURRENT, build $BUILD → $((BUILD + 1))) to $REPO"
+
+# 1. The version
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" -c "Set :CFBundleVersion $((BUILD + 1))" "$PLIST"
+git add "$PLIST"
+git commit -q -m "Version $VERSION" ${TRAILER[@]+"${TRAILER[@]}"}
+git push -q origin main
+
+# 2. The app, zipped and checked the way a user (or the in-app updater) will get it
+bin/notch --build-only >/dev/null
+mkdir -p build/release
+rm -f "$ZIP"
+ditto -c -k --sequesterRsrc --keepParent build/Notch.app "$ZIP"
+CHECK="$(mktemp -d)"
+trap 'rm -rf "${CHECK:?}"' EXIT
+ditto -x -k "$ZIP" "$CHECK"
+codesign --verify --deep --strict "$CHECK/Notch.app"
+[ "$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$CHECK/Notch.app/Contents/Info.plist")" = "$VERSION" ]
+[ -x "$CHECK/Notch.app/Contents/MacOS/notchctl" ]
+SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
+echo "Zip checked: $ZIP ($(du -h "$ZIP" | cut -f1 | xargs)), sha256 $SHA"
+
+# 3. The GitHub release
+EXTENSION="$(ls -t build/release/Notch-Chrome-extension-*.zip 2>/dev/null | head -1 || true)"
+gh release create "v$VERSION" --repo "$REPO" --target main --title "Notch $VERSION" --notes-file "$NOTES" \
+  "$ZIP" ${EXTENSION:+"$EXTENSION"}
+PUBLISHED="$(gh release view "v$VERSION" --repo "$REPO" --json assets \
+  --jq ".assets[] | select(.name == \"Notch-$VERSION.zip\") | .digest" | sed 's/^sha256://')"
+[ "$PUBLISHED" = "$SHA" ] || { echo "GitHub's checksum ($PUBLISHED) doesn't match the zip ($SHA)"; exit 1; }
+
+# 4. The Homebrew cask
+if [ -d "$TAP_DIR/.git" ]; then
+  mkdir -p "$TAP_DIR/Casks"
+  sed -e "s/VERSION/$VERSION/" -e "s/SHA256/$SHA/" packaging/homebrew/notch.rb > "$TAP_DIR/Casks/notch.rb"
+  git -C "$TAP_DIR" add Casks/notch.rb
+  git -C "$TAP_DIR" commit -q -m "notch $VERSION" ${TRAILER[@]+"${TRAILER[@]}"}
+  git -C "$TAP_DIR" push -q origin HEAD
+  echo "Cask updated: notch $VERSION"
+else
+  echo "No tap at $TAP_DIR: the Homebrew cask wasn't updated (set TAP_DIR to your homebrew-tap checkout)"
+fi
+
+# 5. This Mac
+if [ "$INSTALL" = 1 ]; then bin/notch --no-log >/dev/null; else echo "Left this Mac's copy as it was (--no-install)"; fi
+echo "Released: https://github.com/$REPO/releases/tag/v$VERSION"
