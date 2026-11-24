@@ -71,8 +71,17 @@ import EventKit
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.evaluate() } }
         }
         reload()
-        if access == .granted { log("meetings: \(calendars.count) calendars, \(upcoming.count) events coming up") }
+        if access == .granted { log("meetings: " + summary) }
         else { log("meetings: calendar access \(access)") }
+    }
+
+    /// "7 calendars (Google 4, On My Mac 3), 3 events coming up, 2 with a call link".
+    private var summary: String {
+        let accounts = Dictionary(grouping: calendars, by: \.account).sorted { $0.key < $1.key }
+            .map { "\($0.key) \($0.value.count)" }.joined(separator: ", ")
+        let calls = upcoming.filter { $0.joinURL != nil }.count
+        return "\(calendars.count) calendar\(calendars.count == 1 ? "" : "s")" + (accounts.isEmpty ? "" : " (\(accounts))")
+            + ", \(upcoming.count) event\(upcoming.count == 1 ? "" : "s") coming up, \(calls) with a call link"
     }
 
     /// Shows macOS's "Notch would like to access your calendars" prompt.
@@ -96,11 +105,14 @@ import EventKit
             publish(nil)
             return
         }
+        let before = Set(calendars.map(\.id))
         calendars = store.calendars(for: .event)
             .map { CalendarInfo(id: $0.calendarIdentifier, title: $0.title, account: $0.source?.title ?? "Other",
                                 color: RGB(nsColor: $0.color)) }
             .sorted { ($0.account, $0.title) < ($1.account, $1.title) }
         evaluate()
+        // An account added or removed in Internet Accounts (not the first load: start() says that).
+        if !before.isEmpty, before != Set(calendars.map(\.id)) { log("meetings: calendars changed, now " + summary) }
     }
 
     /// Picks what to show now, and schedules the next look for the next moment that matters.
