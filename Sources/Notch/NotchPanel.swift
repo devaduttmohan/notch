@@ -166,7 +166,7 @@ final class NotchHostingView<Content: View>: NSHostingView<Content> {
 
     private func mouseMoved() {
         let point = NSEvent.mouseLocation
-        let layout = model.layout
+        let layout = model.liveLayout
         // The zone to leave is bigger than the zone to enter, so the edge doesn't flicker.
         if model.hovering {
             let zone = layout.screenRect(for: .expanded, kind: model.expandedKind).insetBy(dx: -12, dy: -12)

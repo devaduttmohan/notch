@@ -137,6 +137,20 @@ a live CPU sparkline, and **Quit** (then **Force Quit**), **Not now** (30 min), 
 and 5 GB of free disk, and when macOS starts throttling a hot Mac. Thresholds and the
 ignore list are in Customise › Modules.
 
+## CPU & memory
+
+Off until you switch it on in Customise › Modules. The Mac's totals (Mach and sysctl calls,
+no permissions) every 2 s, every second while its page is open, nothing while you're away.
+The closed pill shows CPU on the left and memory used on the right (CPU only, or memory
+only, if you prefer): **always**, only **when busy** (the default: CPU averaging 80 % or more
+over 30 s, adjustable to 70 or 90, or memory pressure raised), or never (**island only**).
+A busy reading turns orange, a critical one red. Busy CPU or critical memory takes the
+pill from your music; memory pressure that's only elevated (a Mac that swaps all day) waits
+behind it, in the bubble. The open island's page has CPU over the
+last minute (user and system), memory split like Activity Monitor (app, wired, compressed,
+free) with its pressure and swap, and your apps using the most, helpers summed into their
+app and a dev server shown with its folder; click one to quit it.
+
 ## Jenkins builds
 
 Builds you start in Jenkins, on any job: Notch asks Jenkins which builds are running
@@ -368,6 +382,8 @@ need their own route (not built yet).
 | `CustomiserWindow.swift`, `CustomiserView.swift`, `CustomiserControls.swift` | the customiser window, its panes, preview and controls |
 | `Resources/Info.plist` + `bin/notch` | the app bundle: build, sign, launch |
 | `SystemMonitor.swift` + `ProcessViews.swift` | runaway processes, low disk, heat; their pill and panel |
+| `LoadMonitor.swift` + `LoadViews.swift` | CPU & memory, live: the sampler with busy/calm, its pill and page |
+| `PRCopy.swift` | what Copy puts on the clipboard for a PR (link, rich title and link, branch, Markdown) |
 | `KeepAwake.swift` | the idle-sleep assertion and its reasons |
 | `GitHub.swift` + `PRViews.swift` | PR watcher (gh GraphQL), change detection, banners; pill, bubble, tabs, PR page |
 | `GitHubAccount.swift` | the gh account: who's signed in, browser sign-in, switching |

@@ -14,6 +14,7 @@ import Combine
     private var monitor: SystemMonitor?
     private let prs = PRWatcher()
     private let keepAwake = KeepAwake()
+    private let load = LoadMonitor()
     private var keepAwakeItem: NSMenuItem?
     private var timerItem: NSMenuItem?
     private var clearItem: NSMenuItem?
@@ -36,6 +37,7 @@ import Combine
         startHealthAndKeepAwake(for: model)
         startPullRequests(for: model)
         startBuilds(for: model)
+        startLoad(for: model)
         model.openCustomiser = { [weak self] in self?.openCustomiser() }
         model.openClaudeSession = { [weak self] session in self?.claude?.open(session: session) }
         setUpStatusItem()
@@ -86,6 +88,9 @@ import Combine
                         if new.builds { JenkinsWatcher.shared.start() }
                         JenkinsWatcher.shared.onChange?()
                     }
+                }
+                if new.loadMonitor != before.loadMonitor {
+                    DispatchQueue.main.async { new.loadMonitor ? self.load.start() : self.load.stop() }
                 }
                 if new.pullRequests != before.pullRequests || new.prIgnoredAuthors != before.prIgnoredAuthors {
                     DispatchQueue.main.async {
@@ -142,6 +147,18 @@ import Combine
         model.buildsSeen = { jenkins.markSeen() }
         prs.onPush = { jenkins.lookSoon() }
         jenkins.start()
+    }
+
+    /// CPU & memory, live: the pill (always or when busy) and its page in the open island.
+    private func startLoad(for model: NotchModel) {
+        load.isAway = { [weak self] in !(self?.prs.away.isEmpty ?? true) }
+        load.processes = { [weak self] limit in self?.monitor?.topProcesses(limit) ?? [] }
+        load.onChange = { [weak model] snapshot in
+            model?.load = SettingsStore.shared.value.loadMonitor ? snapshot : nil
+        }
+        model.loadQuit = { [weak self] process in self?.monitor?.quit(process) }
+        model.loadPageShown = { [weak self] shown in self?.load.setFast(shown) }
+        if SettingsStore.shared.value.loadMonitor { load.start() }
     }
 
     @objc private func toggleKeepAwake() {

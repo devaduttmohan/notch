@@ -50,6 +50,12 @@ struct NotchSettings: Codable, Equatable {
     var videoMeetingsOnly = false
     var hiddenCalendars: [String] = []        // calendar identifiers switched off
 
+    // CPU & memory (live)
+    var loadMonitor = false
+    var loadPill: LoadPill = .busy            // when the closed island shows it
+    var loadShow: LoadShow = .both
+    var loadBusyCPU = 80                      // % of the whole Mac, for 30 s, counts as busy
+
     // System health
     var cpuAlert = 150                        // % of one core, sustained for 2 minutes
     var memoryAlertGB = 8
@@ -61,6 +67,20 @@ struct NotchSettings: Codable, Equatable {
     // Keep awake
     var keepAwakeClaude = true                // while a Claude Code turn is running
     var keepAwakeCommands = true              // while `notchctl run` commands run
+}
+
+/// When the closed island shows CPU & memory: always, only while the Mac is busy, or never
+/// (the open island still has its page).
+enum LoadPill: String, Codable, CaseIterable, Identifiable {
+    case always, busy, never
+    var id: Self { self }
+    var name: String { [.always: "Always", .busy: "When busy", .never: "Island only"][self]! }
+}
+
+enum LoadShow: String, Codable, CaseIterable, Identifiable {
+    case both, cpu, memory
+    var id: Self { self }
+    var name: String { [.both: "Both", .cpu: "CPU", .memory: "Memory"][self]! }
 }
 
 enum BackgroundStyle: String, Codable, CaseIterable, Identifiable {

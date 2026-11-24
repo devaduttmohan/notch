@@ -174,6 +174,7 @@ extension NotchModel {
         case .process: return .orange
         case .pullRequests(let summary): return summary.needsYou ? .red : .prGreen
         case .builds(let summary): return summary.running.isEmpty && summary.unseenFailure ? .red : .buildBlue
+        case .load(let load): return load.busy ? (load.cpuLevel == .critical || load.memoryLevel == .critical ? .red : .orange) : .loadCPU
         case .home, nil: return Color(red: 0.36, green: 0.42, blue: 1)
         }
     }

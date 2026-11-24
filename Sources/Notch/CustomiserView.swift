@@ -680,6 +680,8 @@ struct ModulesPane: View {
                        detail: "Connected, with their battery.", isOn: $store.value.headphones)
             ModuleCard(symbol: "flame.fill", color: Color(red: 1, green: 0.42, blue: 0.2), title: "System health",
                        detail: "Runaway processes, low disk, a hot Mac.", isOn: $store.value.systemHealth)
+            ModuleCard(symbol: "gauge.with.dots.needle.67percent", color: Color(red: 0.1, green: 0.62, blue: 0.85), title: "CPU & memory",
+                       detail: "Live CPU and memory, in the island.", isOn: $store.value.loadMonitor)
             ModuleCard(symbol: PullRequestIcon.symbolName, color: Color.prGreen, title: "Pull requests",
                        detail: "Checks, reviews and comments via gh.", isOn: $store.value.pullRequests)
             ModuleCard(symbol: "hammer.fill", color: .buildBlue, title: "Jenkins builds",
@@ -699,6 +701,35 @@ struct ModulesPane: View {
             SystemHealthCard(store: store)
                 .padding(.top, 14)
                 .transition(.opacity.combined(with: .offset(y: -8)))
+        }
+        if store.value.loadMonitor {
+            LoadCard(store: store)
+                .padding(.top, 14)
+                .transition(.opacity.combined(with: .offset(y: -8)))
+        }
+    }
+}
+
+/// CPU & memory: when the closed island shows it, what it shows, and what counts as busy.
+private struct LoadCard: View {
+    @ObservedObject var store: SettingsStore
+
+    var body: some View {
+        NCard(title: "CPU & memory", symbol: "gauge.with.dots.needle.67percent") {
+            NRow(title: "In the closed island", detail: "Always, only while the Mac is busy, or only on its page in the open island.") {
+                NSegmented(selection: $store.value.loadPill, options: LoadPill.allCases.map { ($0, $0.name) })
+                    .frame(width: 300)
+            }
+            NRow(title: "Show") {
+                NSegmented(selection: $store.value.loadShow, options: LoadShow.allCases.map { ($0, $0.name) })
+                    .frame(width: 300)
+            }
+            NRow(title: "Busy means", detail: "CPU averaging this or more over 30 s, or memory pressure raised (as in Activity Monitor).") {
+                NSegmented(selection: $store.value.loadBusyCPU, options: [70, 80, 90].map { ($0, "\($0)%") })
+                    .frame(width: 200)
+            }
+            Text("Reads the Mac's totals every 2 s (every second while its page is open), well under 0.1% CPU, and nothing while you're away. The apps list shows your own apps; macOS keeps other users' and the system's private.")
+                .font(.system(size: 11)).foregroundStyle(Palette.tertiary).fixedSize(horizontal: false, vertical: true)
         }
     }
 }

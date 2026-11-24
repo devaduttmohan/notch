@@ -101,6 +101,8 @@ struct BubbleGlyph: View {
                 }
             case let .builds(summary):
                 BuildMark(summary: summary, size: 17)
+            case let .load(load):
+                LoadBubble(load: load)
             case let .meeting(meeting):
                 MeetingGlyph(meeting: meeting, size: 18)
             case let .timer(timer):

@@ -25,7 +25,7 @@ struct NotchView: View {
         _model = ObservedObject(wrappedValue: model)
         _settings = ObservedObject(wrappedValue: settings)
         let state = model.state
-        let spec = model.layout.spec(for: state, kind: model.expandedKind)
+        let spec = model.liveLayout.spec(for: state, kind: model.expandedKind)
         shown = State(initialValue: state)
         width = State(initialValue: spec.size.width)
         height = State(initialValue: spec.size.height)
@@ -104,7 +104,7 @@ struct NotchView: View {
 
     /// Animate to a new state: content, width and height each on their own curve.
     private func move(from old: NotchState, to new: NotchState) {
-        let target = model.layout.spec(for: new, kind: model.expandedKind)
+        let target = model.liveLayout.spec(for: new, kind: model.expandedKind)
         let curves = Motion.shapeCurves(from: old, to: new)
         withAnimation(Motion.animation(Motion.contentSwap)) {
             shown.wrappedValue = new        // the content transition carries its own timing
@@ -126,7 +126,7 @@ struct NotchView: View {
     private func swell() {
         let state = shown.wrappedValue
         guard model.state == state, state != .expanded else { return }
-        let spec = model.layout.spec(for: state, kind: model.expandedKind)
+        let spec = model.liveLayout.spec(for: state, kind: model.expandedKind)
         let extra = model.armed ? CGSize(width: 16, height: 4) : .zero
         withAnimation(Motion.animation(Motion.grow)) {
             width.wrappedValue = spec.size.width + extra.width
@@ -147,7 +147,7 @@ struct NotchView: View {
 
     /// Size or roundness changed in the customiser: spring to the new shape.
     private func reshape() {
-        let target = model.layout.spec(for: shown.wrappedValue, kind: model.expandedKind)
+        let target = model.liveLayout.spec(for: shown.wrappedValue, kind: model.expandedKind)
         withAnimation(Motion.animation(Motion.appear)) {
             width.wrappedValue = target.size.width
             height.wrappedValue = target.size.height
@@ -159,7 +159,7 @@ struct NotchView: View {
     /// Open, and the content gains or loses its timeline: grow or shrink to fit.
     private func resizeExpanded() {
         guard shown.wrappedValue == .expanded else { return }
-        let target = model.layout.spec(for: .expanded, kind: model.expandedKind)
+        let target = model.liveLayout.spec(for: .expanded, kind: model.expandedKind)
         // A list fitting its content (a PR row opening or closing) moves on the same spring as
         // the row, so the edge and the content travel together; page changes use the shape's own.
         let fitting: Bool = if case .listFit = model.expandedKind { true } else { false }
@@ -184,7 +184,7 @@ struct NotchView: View {
 
     /// Jump straight to a state (screen changes).
     private func settle(on state: NotchState) {
-        let spec = model.layout.spec(for: state, kind: model.expandedKind)
+        let spec = model.liveLayout.spec(for: state, kind: model.expandedKind)
         shown.wrappedValue = state
         width.wrappedValue = spec.size.width
         height.wrappedValue = spec.size.height
@@ -197,7 +197,7 @@ struct NotchView: View {
     /// reveals or hides it, so nothing reflows mid-animation.
     @ViewBuilder
     private func content(for state: NotchState) -> some View {
-        let spec = model.layout.spec(for: state, kind: model.expandedKind)
+        let spec = model.liveLayout.spec(for: state, kind: model.expandedKind)
         let notch = model.layout.geometry.notchSize
         switch state {
         case .idle:
@@ -208,7 +208,7 @@ struct NotchView: View {
                 CompactLeading(activity: model.compactActivity, ns: ns)
                 Spacer(minLength: notch.width)
                 CompactTrailing(activity: model.compactActivity, tint: model.waveformTint)
-                    .frame(maxWidth: model.layout.compactSideWidth - 14, alignment: .trailing)   // never past the pill's edge
+                    .frame(maxWidth: model.liveLayout.compactSideWidth + model.liveLayout.pillExtra - 14, alignment: .trailing)   // never past the pill's edge
             }
             .padding(.horizontal, 12)
             .frame(width: spec.size.width, height: notch.height)
@@ -224,7 +224,7 @@ struct NotchView: View {
         case .expanded:
             let kinds = model.pages.map(\.kind)
             let current = model.expandedActivity?.kind
-            let isListPage = current == .pullRequests || current == .builds
+            let isListPage = current == .pullRequests || current == .builds || current == .load
             let wing = (spec.size.width - notch.width) / 2 - 18
             VStack(spacing: 0) {
                 // The camera row: free space either side of the camera holds the page switcher.
@@ -448,6 +448,8 @@ private struct CompactLeading: View {
         case let .builds(summary):
             BuildMark(summary: summary)
                 .matchedGeometryEffect(id: "leading", in: ns)
+        case let .load(load):
+            LoadPillLeading(load: load)
         case .home:
             EmptyView()
         case nil:
@@ -480,6 +482,8 @@ private struct CompactTrailing: View {
             PRProgress(summary: summary)
         case let .builds(summary):
             BuildProgress(summary: summary)
+        case let .load(load):
+            LoadPillTrailing(load: load)
         case .home:
             EmptyView()
         case let .nowPlaying(nowPlaying):
@@ -527,6 +531,10 @@ private struct ExpandedContent: View {
             }
         case let .builds(summary):
             BuildsExpanded(summary: summary, server: model.jenkinsServer) { model.buildAction?($0) }
+        case let .load(load):
+            LoadExpanded(load: load, measured: { height in
+                if abs(model.loadContentHeight - height) > 0.5 { model.loadContentHeight = height }
+            }) { model.loadQuit?($0) }
         case .home:
             HomeExpanded(model: model)
         case let .meeting(meeting):

@@ -200,6 +200,7 @@ extension Activity {
         case .timer: .timer
         case .pullRequests: .pullRequests
         case .builds: .builds
+        case .load: .load
         case .home: .home
         }
     }
@@ -223,7 +224,7 @@ enum PRAction {
 
 /// The kinds of thing the island shows; the open island has a page for each one that's live.
 enum ActivityKind: Hashable {
-    case claude, claudeUpdates, meeting, process, music, timer, pullRequests, builds, home
+    case claude, claudeUpdates, meeting, process, music, timer, pullRequests, builds, load, home
 
     var symbol: String {
         switch self {
@@ -234,6 +235,7 @@ enum ActivityKind: Hashable {
         case .timer: "timer"
         case .pullRequests: PullRequestIcon.symbolName
         case .builds: "hammer.fill"
+        case .load: "gauge.with.dots.needle.67percent"
         case .home: "clock"
         }
     }
@@ -247,6 +249,7 @@ enum ActivityKind: Hashable {
         case .timer: "Timer"
         case .pullRequests: "Pull requests"
         case .builds: "Builds"
+        case .load: "CPU & memory"
         case .home: "Now"
         }
     }
@@ -260,6 +263,7 @@ enum Activity: Equatable {
     case process(RunawayProcess)
     case pullRequests(PRSummary)
     case builds(BuildSummary)
+    case load(LoadSnapshot)
     case home
     case timer(TimerInfo)
     case nowPlaying(NowPlaying)
@@ -280,6 +284,12 @@ enum Activity: Equatable {
     @Published var prSummary: PRSummary?
     /// Your Jenkins builds (from `JenkinsWatcher`).
     @Published var builds: BuildSummary?
+    /// The Mac's CPU and memory, live (from `LoadMonitor`, while that module is on).
+    @Published var load: LoadSnapshot?
+    /// Set by the app: quit one of the apps on the CPU & memory page; that page is on screen
+    /// (the monitor then looks every second).
+    var loadQuit: ((LoadProcess) -> Void)?
+    var loadPageShown: ((Bool) -> Void)?
     /// The Jenkins server, for the builds page's link.
     var jenkinsServer: URL?
     /// Set by the app: open a build's console (or Jenkins), and "you've seen the builds page".
@@ -379,6 +389,10 @@ enum Activity: Equatable {
             builds = nil
             if pinned == .builds { pinned = nil }
         }
+        if !new.loadMonitor {
+            load = nil
+            if pinned == .load { pinned = nil }
+        }
     }
 
     // MARK: What to show
@@ -425,13 +439,25 @@ enum Activity: Equatable {
         if let wait = claudeWaits.first { list.append(.claude(wait)) }
         if let meeting, meeting.prominent { list.append(.meeting(meeting)) }      // starting now beats music
         if let runaway { list.append(.process(runaway)) }
+        if let load = loadInPill, load.pressing { list.append(.load(load)) }   // the Mac is struggling: say so
         if let nowPlaying, nowPlaying.isPlaying { list.append(.nowPlaying(nowPlaying)) }
         if let meeting, !meeting.prominent { list.append(.meeting(meeting)) }
         if let timer { list.append(.timer(timer)) }
         if let builds, builds.live, settings.builds { list.append(.builds(builds)) }
         if let prSummary, prSummary.live, settings.pullRequests { list.append(.pullRequests(prSummary)) }
+        if let load = loadInPill, !load.pressing { list.append(.load(load)) }  // calm ("Always"), or memory only elevated
         if let nowPlaying, !nowPlaying.isPlaying { list.append(.nowPlaying(nowPlaying)) }
         return list
+    }
+
+    /// CPU & memory, when the closed island should show it: always, or only while busy.
+    private var loadInPill: LoadSnapshot? {
+        guard settings.loadMonitor, let load else { return nil }
+        switch settings.loadPill {
+        case .always: return load
+        case .busy: return load.busy ? load : nil
+        case .never: return nil
+        }
     }
 
     /// Claude waiting on you, a meeting starting now: these take the pill whatever you chose.
@@ -444,7 +470,7 @@ enum Activity: Equatable {
     }
 
     /// Sections the closed island can be pinned to.
-    static let pinnable: Set<ActivityKind> = [.music, .pullRequests, .builds, .meeting, .timer, .process]
+    static let pinnable: Set<ActivityKind> = [.music, .pullRequests, .builds, .meeting, .timer, .process, .load]
 
     /// The bubble beside the pill: the next most important thing that's actually happening.
     /// Paused music never takes it (a lone ▶ beside your PRs is noise); it keeps its tab in
@@ -477,7 +503,7 @@ enum Activity: Equatable {
         // A section you chose that isn't live on its own still gets its tab. Not PRs or builds:
         // they always have theirs, in a fixed place below, so choosing one (which pins it)
         // never swaps them round.
-        if let chosen = liveActivities.first(where: { $0.kind == pinned }), ![.pullRequests, .builds].contains(chosen.kind),
+        if let chosen = liveActivities.first(where: { $0.kind == pinned }), ![.pullRequests, .builds, .load].contains(chosen.kind),
            !list.contains(where: { $0.kind == chosen.kind }) {
             list.append(chosen)
         }
@@ -487,6 +513,10 @@ enum Activity: Equatable {
         }
         if let builds, settings.builds, !builds.all.isEmpty, !list.contains(where: { $0.kind == .builds }) {
             list.append(.builds(builds))
+        }
+        // CPU & memory always has its page, last, whatever the closed island does with it.
+        if let load, settings.loadMonitor, !list.contains(where: { $0.kind == .load }) {
+            list.append(.load(load))
         }
         return list
     }
@@ -503,6 +533,8 @@ enum Activity: Equatable {
 
     /// How tall the PR page's content is (measured by the view), so the island can fit it.
     @Published var prContentHeight: CGFloat = 0
+    /// The same for the CPU & memory page.
+    @Published var loadContentHeight: CGFloat = 0
 
     /// The PR row that's open on the PR page. Until you choose, the newest PR with news.
     @Published private(set) var openPR: String?
@@ -566,8 +598,19 @@ enum Activity: Equatable {
                 return height + 44 + bar + (running && !build.stages.isEmpty ? 18 : 0)   // + the stage line under a running pipeline
             }
             return .listFit((rows + layout.geometry.notchSize.height + 16).rounded(.up))
+        case .load:
+            guard loadContentHeight > 0 else { return .list }
+            return .listFit((loadContentHeight + layout.geometry.notchSize.height + 16).rounded(.up))
         default: return .standard
         }
+    }
+
+    /// The layout as drawn right now: the closed pill is a little wider while it shows CPU &
+    /// memory (two readings, "23%" and "14.2 GB", where others show a glyph and one value).
+    var liveLayout: NotchLayout {
+        var live = layout
+        if case .load = compactActivity { live.pillExtra = 14 }
+        return live
     }
 
     /// Notes how long the Claude-updates and PR pages have been on screen: half a second or
@@ -585,6 +628,7 @@ enum Activity: Equatable {
             if now.timeIntervalSince(since) >= 0.5 { prsSeen?(); prUpdatesRead = true }
             prsShownAt = nil
         }
+        loadPageShown?(shown == .load)
         if shown == .builds { buildsShownAt = buildsShownAt ?? now }
         else if let since = buildsShownAt {
             if now.timeIntervalSince(since) >= 0.5 { buildsSeen?() }

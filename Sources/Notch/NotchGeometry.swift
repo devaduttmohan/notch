@@ -66,6 +66,7 @@ struct NotchLayout: Equatable {
     var geometry: NotchGeometry
     var size: IslandSize = .standard
     var roundness: Double = 1                     // scales the bottom corners
+    var pillExtra: CGFloat = 0                    // each side of the closed pill, for a wider reading
 
     /// The hardware plus the customiser's size and roundness.
     @MainActor static func current() -> NotchLayout {
@@ -109,7 +110,7 @@ struct NotchLayout: Equatable {
         case .idle:
             return NotchSpec(size: notch, topRadius: 0, bottomRadius: 10)
         case .compact:
-            return NotchSpec(size: CGSize(width: notch.width + 2 * compactSideWidth, height: notch.height),
+            return NotchSpec(size: CGSize(width: notch.width + 2 * (compactSideWidth + pillExtra), height: notch.height),
                              topRadius: 6, bottomRadius: round(12, cap: notch.height / 2))
         case .banner:
             return NotchSpec(size: CGSize(width: max(bannerWidth, notch.width + 2 * compactSideWidth),

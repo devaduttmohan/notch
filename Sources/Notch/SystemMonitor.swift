@@ -35,15 +35,19 @@ struct RunawayProcess: Equatable, Identifiable {
         var name: String
         var cpuNanos: UInt64
         var resident: UInt64
+        var footprint: UInt64          // what Activity Monitor's Memory column shows
     }
     private struct Point {
         var time: Date
         var cpuNanos: UInt64
         var resident: UInt64
+        var footprint: UInt64
     }
 
     private var history: [Int32: [Point]] = [:]
     private var names: [Int32: String] = [:]
+    private var paths: [Int32: String] = [:]          // executable paths, read once per process
+    private var appNames: [String: String] = [:]
     private var flagged: RunawayProcess?
     private var announced: Set<Int32> = []
     private var snoozed: [String: Date] = [:]
@@ -96,13 +100,14 @@ struct RunawayProcess: Equatable, Identifiable {
             var points = history[sample.pid] ?? []
             // A pid reused by a new process: its CPU time went backwards. Start over.
             if let last = points.last, sample.cpuNanos < last.cpuNanos { points = [] }
-            points.append(Point(time: now, cpuNanos: sample.cpuNanos, resident: sample.resident))
+            points.append(Point(time: now, cpuNanos: sample.cpuNanos, resident: sample.resident, footprint: sample.footprint))
             points.removeAll { now.timeIntervalSince($0.time) > 300 }
             history[sample.pid] = points
         }
         for pid in history.keys where !alive.contains(pid) {
             history[pid] = nil
             names[pid] = nil
+            paths[pid] = nil
             announced.remove(pid)
         }
         evaluate(now: now)
@@ -211,6 +216,79 @@ struct RunawayProcess: Equatable, Identifiable {
         publish(nil)
     }
 
+    // MARK: Using the most (for the CPU & memory page)
+
+    /// Your apps using the most right now: CPU over the last ~10 s and memory footprint, an
+    /// app's helper processes summed into it (Brave's renderers count as Brave), ranked by
+    /// CPU plus memory (1 GB weighs like 10 % of a core). Only your own processes are readable.
+    func topProcesses(_ limit: Int) -> [LoadProcess] {
+        let now = Date()
+        var groups: [String: LoadProcess] = [:]
+        for (pid, points) in history {
+            guard let name = names[pid], let last = points.last, now.timeIntervalSince(last.time) < 20 else { continue }
+            let cpu = points.count > 1 ? Self.cpu(points, over: 10, now: now) : 0
+            let memory = Double(last.footprint) / 1_073_741_824
+            let path: String
+            if let known = paths[pid] { path = known } else { path = Self.executablePath(pid); paths[pid] = path }
+            if let app = Self.appBundle(of: path) {
+                var group = groups[app] ?? LoadProcess(id: app, name: appName(app), folder: nil, appPath: app, pids: [], cpu: 0, memoryGB: 0)
+                group.pids.append(pid)
+                group.cpu += cpu
+                group.memoryGB += memory
+                groups[app] = group
+            } else {
+                groups["pid:\(pid)"] = LoadProcess(id: "pid:\(pid)", name: Self.plainName(name, path: path), folder: nil, appPath: nil,
+                                                   pids: [pid], cpu: cpu, memoryGB: memory)
+            }
+        }
+        let score = { (process: LoadProcess) in process.cpu + process.memoryGB * 10 }
+        return groups.values.sorted { score($0) > score($1) }.prefix(limit).map { process in
+            var process = process
+            if process.appPath == nil, let pid = process.pids.first { process.folder = Self.workingFolder(pid) }
+            return process
+        }
+    }
+
+    /// Quit an app (all of it, like the Dock) or a process (a polite SIGTERM).
+    func quit(_ process: LoadProcess) {
+        if let path = process.appPath,
+           let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleURL?.path == path }) {
+            app.terminate()
+        } else {
+            process.pids.forEach { kill($0, SIGTERM) }
+        }
+        log("load: asked \(process.name) to quit")
+    }
+
+    /// The name you see in Finder and the Dock ("Visual Studio Code", not its bundle's "Code").
+    private func appName(_ bundle: String) -> String {
+        if let known = appNames[bundle] { return known }
+        let name = (FileManager.default.displayName(atPath: bundle) as NSString).deletingPathExtension
+        appNames[bundle] = name
+        return name
+    }
+
+    /// A process outside any app: its full executable name (the short name is cut at 32
+    /// characters), and a virtual machine (Docker, OrbStack, UTM) said plainly.
+    nonisolated static func plainName(_ name: String, path: String) -> String {
+        let full = path.isEmpty ? name : (path as NSString).lastPathComponent
+        if full.hasPrefix("com.apple.Virtualization.VirtualMachine") { return "Virtual machine" }
+        return full
+    }
+
+    nonisolated static func executablePath(_ pid: Int32) -> String {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+        guard length > 0 else { return "" }
+        return String(decoding: buffer.prefix(Int(length)).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    }
+
+    /// "/Applications/Brave Browser.app/Contents/Frameworks/…/Helper.app/…" → the outer app.
+    nonisolated static func appBundle(of path: String) -> String? {
+        guard let range = path.range(of: ".app/") else { return nil }
+        return String(path[..<range.lowerBound]) + ".app"
+    }
+
     // MARK: Disk and heat
 
     private func checkDisk() {
@@ -281,8 +359,13 @@ struct RunawayProcess: Equatable, Identifiable {
             var nameBuffer = [CChar](repeating: 0, count: 256)
             proc_name(pid, &nameBuffer, UInt32(nameBuffer.count))
             let name = String(decoding: nameBuffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+            var usage = rusage_info_v4()
+            let read = withUnsafeMutablePointer(to: &usage) {
+                $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
+            }
             samples.append(Sample(pid: pid, name: name.isEmpty ? "pid \(pid)" : name, cpuNanos: nanos,
-                                  resident: info.pti_resident_size))
+                                  resident: info.pti_resident_size,
+                                  footprint: read == 0 ? usage.ri_phys_footprint : info.pti_resident_size))
         }
         return samples
     }
