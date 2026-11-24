@@ -2,7 +2,8 @@
 # Stable path to notchctl for scripts and Claude Code hooks; runs the built binary.
 here="$(cd "$(dirname "$0")/.." && pwd)"
 for bin in "$here/.build/out/Products/Debug/notchctl" "$here/.build/debug/notchctl" \
-           "$here/.build/out/Products/Release/notchctl" "$here/.build/release/notchctl"; do
+           "$here/.build/out/Products/Release/notchctl" "$here/.build/release/notchctl" \
+           "/Applications/Notch.app/Contents/MacOS/notchctl"; do
   [ -x "$bin" ] && exec "$bin" "$@"
 done
 # Not built yet: never break the caller. `run` still runs the command.
