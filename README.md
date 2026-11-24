@@ -134,6 +134,34 @@ a live CPU sparkline, and **Quit** (then **Force Quit**), **Not now** (30 min), 
 and 5 GB of free disk, and when macOS starts throttling a hot Mac. Thresholds and the
 ignore list are in Customise › Modules.
 
+## Jenkins builds
+
+Builds you start in Jenkins, on any job: Notch asks Jenkins which builds are running
+(`/computer/api/json`, one small request that covers every executor, pipelines included)
+and which are queued, and keeps the ones started by you, or by a push of yours (your
+GitHub login). The pill shows a blue hammer and a ring filling towards Jenkins' estimate
+with the minutes left ("queued" while it waits for an executor; time so far on a first run,
+which has no estimate). Open the island for the builds page: each build's current stage
+and time ("Test · 3m 41s of ~5m"), a **stage bar** for pipelines (green done, blue running,
+red failed; from the Stage View plugin's `wfapi`, or the newer Pipeline Graph View, whichever
+the server has, found once per job), or for a job without stages (freestyle) a time bar
+filling towards the estimate with "~12m left · done ~10:57" ("over by 3m" in orange when it
+runs long), finished builds with how they
+ended, and **Console**. When one ends, a banner: "Deploy-staging #482 passed · took 4m 10s",
+or "failed · at Test · after 4m 10s". A failure keeps a red dot until you've seen the page.
+
+Sign in from Customise › Modules › Jenkins builds: the server (filled in from your PR
+checks' links), your Jenkins username, and an API token (**Make a token** opens Jenkins'
+page for it). The token is checked with Jenkins, then stored in your login keychain through
+macOS's `security` tool, the way gh keeps its token (never in the settings file): the entry
+belongs to that tool rather than one build of Notch, so rebuilding never brings up a keychain
+prompt, and it's read off the main thread. **Sign out** removes it. Notch only reads. Every 20 s while a build
+of yours runs (executors, queue, stages: about 540 small requests an hour, only then).
+Otherwise builds come in bursts, so the looks thin out: every 90 s for 10 minutes after
+anything of yours ran, every 3 minutes until half an hour, then every 5 minutes asking only
+the executors (about 12 requests an hour). A push to one of your PRs brings a look forward.
+Nothing while you're away; a job without the stage view is asked once and then left alone.
+
 ## Meetings
 
 From the Calendar app's calendars (add Google or Exchange in Internet Accounts).
@@ -156,6 +184,17 @@ declined events are skipped. Nothing leaves the Mac.
 Each state's size and corner radii live in `NotchLayout.spec(for:)`. The
 leading glyph (timer icon / artwork) is shared between compact and expanded via
 `matchedGeometryEffect`, so it slides and grows instead of swapping.
+
+## Spaces and full-screen apps
+
+Notch keeps its panel in a Space of its own that sits above every other and never moves
+(the way macOS keeps its volume and brightness pop-ups up), so the island stays on screen
+through swipes between desktops and full-screen apps. That needs a private window-server
+(SkyLight) call: each function is looked up at launch, and if a macOS update drops one,
+Notch logs it and falls back to moving into each Space after the switch. Turn it off in
+Customise › Behaviour › Display (**Stay put when switching Spaces**). Because a window up
+there would sit over the lock screen too, Notch hides itself (and takes no clicks) while
+the screen is locked or the screen saver runs.
 
 ## Motion
 
@@ -310,6 +349,7 @@ need their own route (not built yet).
 | `Motion.swift` | every spring, delay and transition (see Motion) |
 | `NotchView.swift` | SwiftUI content for each state and activity |
 | `NotchPanel.swift` | overlay panel, hover detection, click-through switching, screen changes |
+| `PinnedSpace.swift` | the panel's own Space above all others (private SkyLight calls, looked up at launch) |
 | `AppDelegate.swift` | menu bar item, launch flags, wires up the browser bridge |
 | `BrowserBridge.swift` | local WebSocket server the Chrome extension talks to |
 | `AlertServer.swift` | private Unix socket for `notchctl`; `say` / `run` banners |
@@ -324,6 +364,9 @@ need their own route (not built yet).
 | `SystemMonitor.swift` + `ProcessViews.swift` | runaway processes, low disk, heat; their pill and panel |
 | `KeepAwake.swift` | the idle-sleep assertion and its reasons |
 | `GitHub.swift` + `PRViews.swift` | PR watcher (gh GraphQL), change detection, banners; pill, bubble, tabs, PR page |
+| `GitHubAccount.swift` | the gh account: who's signed in, browser sign-in, switching |
+| `Jenkins.swift` + `BuildViews.swift` | your Jenkins builds: watcher, history, keychain token; pill, stage bar, builds page |
+| `Symbols.swift` + `StatusIcon.swift` | Notch's own drawn icons (PR, meetings); the menu bar icon |
 | `SessionJump.swift` | where a Claude session runs, and bringing it forward |
 | `Sources/notchctl/` + `bin/notchctl` | the command-line companion |
 | `ChromeExtension/` | the Chrome extension (see above) |
@@ -332,12 +375,10 @@ On a display without a notch it falls back to a 190-pt fake notch.
 
 ## Next steps
 
-1. Real data: battery/charging (IOKit), calendar (EventKit), a drag-and-drop file shelf.
-2. Spotify / Apple Music desktop apps: listen for their track-change broadcasts
-   (`com.spotify.client.PlaybackStateChanged`, `com.apple.Music.playerInfo`) and
-   use AppleScript for controls. Avoid private MediaRemote on this (managed) Mac.
-3. A local listener so scripts can push activities (e.g. Claude Code hooks, build status).
-4. Packaging: Xcode project / `.app` bundle, launch at login via `SMAppService`.
+1. A drag-and-drop file shelf in the open island.
+2. Hover details for finished builds' stages (running builds have them).
+3. Signing with a Developer ID, so the app runs on other Macs without the Gatekeeper
+   warning (today it's signed locally, ad hoc).
 
 Reference: [boring.notch](https://github.com/TheBoredTeam/boring.notch)
 (reported GPL-3.0: read for patterns, don't paste code).
