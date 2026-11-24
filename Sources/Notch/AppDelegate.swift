@@ -160,14 +160,14 @@ import Combine
             model?.show(Banner(symbol: "arrow.down.circle.fill", tint: .green, title: "Notch \(release.version) is available",
                                subtitle: "Update in Customise › About", duration: 7))
         }
-        if let current = updater.currentVersion {
-            let before = SettingsStore.shared.value.lastRunVersion
-            if !before.isEmpty, Updater.isNewer(current, than: before) {
-                log("update: now running \(current) (was \(before))")
-                model.show(Banner(symbol: "checkmark.seal.fill", tint: .green, title: "Updated to Notch \(current)",
-                                  subtitle: "What's new is in Customise › About", duration: 6))
-            }
-            if before != current { SettingsStore.shared.value.lastRunVersion = current }
+        if let before = updater.noteLaunch(), let current = updater.currentVersion {
+            log("update: now running \(current) (was \(before))")
+            model.show(Banner(symbol: "checkmark.seal.fill", tint: .green, title: "Updated to Notch \(current)",
+                              subtitle: "What's new: Customise › About", duration: 6))
+        }
+        updater.onInstallFailed = { [weak model] version, why in
+            model?.show(Banner(symbol: "exclamationmark.triangle.fill", tint: .orange, title: "Notch \(version) wasn't installed",
+                               subtitle: why, duration: 8))
         }
         updater.start()
     }

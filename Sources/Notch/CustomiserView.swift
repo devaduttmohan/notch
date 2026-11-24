@@ -298,9 +298,8 @@ struct CustomiserView: View {
             if let scene = pane.wrappedValue.scene { director.show(scene) }
         }
         .onReceive(NotificationCenter.default.publisher(for: Self.showPane)) { note in
-            if let wanted = (note.object as? String).flatMap(Pane.init(rawValue:)), wanted != pane.wrappedValue {
-                withAnimation(UISpring.snap) { pane.wrappedValue = wanted }
-            }
+            // The same as clicking it in the sidebar (its preview scene too).
+            if let wanted = (note.object as? String).flatMap(Pane.init(rawValue:)) { select(wanted) }
         }
     }
 
@@ -1597,7 +1596,7 @@ struct AboutPane: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Notch").font(.system(size: 22, weight: .bold))
                         Text(version).font(.system(size: 12)).foregroundStyle(Palette.secondary)
-                        Text("A Dynamic Island for your Mac. Everything runs on this Mac; nothing is sent anywhere.")
+                        Text("A Dynamic Island for your Mac. Everything runs on this Mac; it talks only to the services you switch on (GitHub, Jenkins) and checks GitHub for updates.")
                             .font(.system(size: 12)).foregroundStyle(Palette.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         Text("Created by Devadutt Mohan")
@@ -1657,7 +1656,7 @@ struct UpdatesCard: View {
         NCard(title: "Updates", symbol: "arrow.down.circle") {
             status
                 .animation(UISpring.soft, value: updater.phase)
-            if let release = updater.available, !release.highlights.isEmpty, !isBusy {
+            if let release = shownNotes, !release.highlights.isEmpty, !isBusy {
                 VStack(alignment: .leading, spacing: 5) {
                     ForEach(release.highlights, id: \.self) { line in
                         HStack(alignment: .firstTextBaseline, spacing: 7) {
@@ -1681,6 +1680,14 @@ struct UpdatesCard: View {
         .onChange(of: store.value.checkForUpdates) { _, _ in updater.scheduleChecks() }
     }
 
+    /// The notes to show: an available update's, or, right after updating, this version's.
+    private var shownNotes: NotchRelease? {
+        if let release = updater.available { return release }
+        if updater.phase == .upToDate, updater.updatedFrom != nil, let latest = updater.latest,
+           latest.version == updater.currentVersion { return latest }
+        return nil
+    }
+
     private var isBusy: Bool {
         switch updater.phase {
         case .downloading, .installing: true
@@ -1702,8 +1709,17 @@ struct UpdatesCard: View {
                 NButton(title: "Check now", symbol: "arrow.clockwise") {}.opacity(0.4).disabled(true)
             }
         case .upToDate:
-            StatusLine(symbol: "checkmark.seal.fill", tint: .green, title: "Notch is up to date", detail: checkedLine(current)) {
-                NButton(title: "Check now", symbol: "arrow.clockwise") { updater.check(manual: true) }
+            if let from = updater.updatedFrom, let latest = updater.latest, latest.version == current {
+                StatusLine(symbol: "checkmark.seal.fill", tint: .green, title: "Updated to \(current)", detail: "From \(from). Here's what's new.") {
+                    HStack(spacing: 8) {
+                        NButton(title: "What's new", symbol: "arrow.up.right") { NSWorkspace.shared.open(latest.page) }
+                        NButton(title: "Check now", symbol: "arrow.clockwise") { updater.check(manual: true) }
+                    }
+                }
+            } else {
+                StatusLine(symbol: "checkmark.seal.fill", tint: .green, title: "Notch is up to date", detail: checkedLine(current)) {
+                    NButton(title: "Check now", symbol: "arrow.clockwise") { updater.check(manual: true) }
+                }
             }
         case .available(let release):
             StatusLine(symbol: "arrow.down.circle.fill", tint: Palette.blue, title: "Version \(release.version) is available",
@@ -1724,6 +1740,10 @@ struct UpdatesCard: View {
                 StatusLine(symbol: nil, tint: Palette.blue, title: "Installing Notch \(release.version)…",
                            detail: "Checking the download; Notch will restart in a moment.") { EmptyView() }
                 UpdateProgress(fraction: 1)
+            }
+        case .installFailed(let version, let message):
+            StatusLine(symbol: "exclamationmark.triangle.fill", tint: .orange, title: "Notch \(version) wasn't installed", detail: message) {
+                NButton(title: "Try again", symbol: "arrow.clockwise") { updater.check(manual: true) }
             }
         case .failed(let message, let release):
             StatusLine(symbol: "exclamationmark.triangle.fill", tint: .orange,

@@ -66,8 +66,7 @@ struct NotchSettings: Codable, Equatable {
 
     // Updates
     var checkForUpdates = true                // look for new releases on GitHub about every 6 hours
-    var updateAnnounced = ""                  // the newest version a banner has announced
-    var lastRunVersion = ""                   // the version that ran last (an "Updated to …" banner when it changes)
+                                              // (what was announced and what ran last: Updater, in UserDefaults)
 
     // Keep awake
     var keepAwakeClaude = true                // while a Claude Code turn is running
