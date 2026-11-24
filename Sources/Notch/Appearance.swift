@@ -11,6 +11,9 @@ struct IslandBackground: View {
     let tint: Color
     let glow: Double
     var topFade: CGFloat = 46                 // how far down the top stays black
+    /// A video's still, while its page is open: softly blurred behind the island, over the
+    /// chosen style, fading to black towards the controls.
+    var backdrop: NSImage? = nil
 
     var body: some View {
         ZStack {
@@ -38,13 +41,42 @@ struct IslandBackground: View {
                     .opacity(glow)
                     .transition(.opacity)
             }
+            if let backdrop {
+                CinemaBackdrop(image: backdrop)
+                    .opacity(glow)
+                    .transition(.opacity)
+                    .id(ObjectIdentifier(backdrop))      // a new still cross-fades in
+            }
         }
+        .animation(Motion.animation(Motion.contentSwap), value: backdrop.map(ObjectIdentifier.init))
         // Keep the top black wherever the light comes from.
         .overlay(alignment: .top) {
             LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
                 .frame(height: topFade)
                 .allowsHitTesting(false)
         }
+    }
+}
+
+/// A video's still, blurred and dimmed, darkest at the bottom where the controls are.
+private struct CinemaBackdrop: View {
+    let image: NSImage
+
+    var body: some View {
+        GeometryReader { geo in
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: geo.size.width, height: geo.size.height)
+                .clipped()
+                .blur(radius: 22, opaque: true)
+                .opacity(0.6)
+                .overlay(LinearGradient(stops: [.init(color: .black.opacity(0.1), location: 0),
+                                                .init(color: .black.opacity(0.55), location: 0.55),
+                                                .init(color: .black.opacity(0.92), location: 1)],
+                                        startPoint: .top, endPoint: .bottom))
+        }
+        .allowsHitTesting(false)
     }
 }
 

@@ -44,6 +44,8 @@ struct NowPlaying: Equatable {
     var positionDate = Date()
     var rate: Double = 1
     var origin: Origin
+    /// A video with a picture (from the browser), not sound alone: its art shows wide.
+    var isVideo = false
 
     /// One entry per player in `NotchModel.players`.
     var key: String {
@@ -331,6 +333,10 @@ enum Activity: Equatable {
     var toggleKeepAwake: (() -> Void)?
     /// The colour of the current album art (for the Ambient and Aurora backgrounds).
     @Published private(set) var artworkTint: RGB?
+    /// The shown track's art: its width over its height, once loaded; and, for a video, the
+    /// picture itself (the open island's backdrop).
+    @Published private(set) var artworkAspect: CGFloat?
+    @Published private(set) var videoStill: NSImage?
     /// A preview copy (the customiser's): no haptics, sounds or log lines.
     var quiet = false
     /// Set by the app: opens the customiser window.
@@ -1046,26 +1052,56 @@ enum Activity: Equatable {
         refreshArtworkTint()
     }
 
-    /// Works out the colour of the shown track's art (once per cover).
+    /// Works out the colour of the shown track's art, its shape, and for a video the picture
+    /// itself (once per cover).
     private func refreshArtworkTint() {
         guard let shown = nowPlaying else { return }
-        let key = shown.artworkURL?.absoluteString
+        let key = (shown.artworkURL?.absoluteString
             ?? shown.artworkImage.map { "image-\(ObjectIdentifier($0).hashValue)" }
-            ?? "none"
+            ?? "none") + (shown.isVideo ? " video" : "")
         guard key != artworkTintKey else { return }
         artworkTintKey = key
+        artworkAspect = nil
+        videoStill = nil
         if let image = shown.artworkImage {
             artworkTint = ArtworkColor.dominant(of: image)
+            artworkAspect = Self.aspect(of: image)
+            if shown.isVideo { videoStill = image }
         } else if let url = shown.artworkURL, url.scheme == "https" {
             Task { [weak self] in
                 let data = try? await URLSession.shared.data(from: url).0
                 let tint = data.flatMap(ArtworkColor.dominant(of:))
+                let image = data.flatMap(NSImage.init(data:))
                 guard let self, self.artworkTintKey == key else { return }
                 self.artworkTint = tint
+                self.artworkAspect = image.flatMap(Self.aspect(of:))
+                if shown.isVideo { self.videoStill = image }
             }
         } else {
             artworkTint = nil
         }
+    }
+
+    private static func aspect(of image: NSImage) -> CGFloat? {
+        image.size.height > 0 ? image.size.width / image.size.height : nil
+    }
+
+    /// A video's picture shows wide (16:9), unless the picture itself is about square (a
+    /// song's cover, on a site that plays music through a video element).
+    func wideArtwork(_ playing: NowPlaying) -> Bool {
+        playing.isVideo && (artworkAspect ?? 16.0 / 9) >= 1.3
+    }
+
+    /// Whether the closed pill's art shows wide (a video's picture).
+    var compactArtworkWide: Bool {
+        if case .nowPlaying(let playing)? = compactActivity { return wideArtwork(playing) }
+        return false
+    }
+
+    /// The open island's backdrop: the playing video's still, while its page is open.
+    var cinemaStill: NSImage? {
+        guard state == .expanded, case .nowPlaying(let playing)? = expandedActivity, wideArtwork(playing) else { return nil }
+        return videoStill
     }
 
     /// From the browser bridge. nil means nothing is playing in the browser.

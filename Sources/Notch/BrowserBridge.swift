@@ -132,6 +132,7 @@ import Network
         var artist: String?
         var site: String?
         var artwork: String?
+        var kind: String?               // "video" or "audio" (extension 0.5 on)
         var isPlaying: Bool?
         var canSkip: Bool?
         var canSeek: Bool?
@@ -159,7 +160,8 @@ import Network
                                         position: max(0, message.position ?? 0),
                                         positionDate: Date(),
                                         rate: message.rate ?? 1,
-                                        origin: .browser(tabId: tabId))
+                                        origin: .browser(tabId: tabId),
+                                        isVideo: message.kind == "video")
             // Playhead syncs arrive every few seconds; only log real changes.
             let line = "browser: \(nowPlaying.isPlaying ? "playing" : "paused") \"\(nowPlaying.title)\" on \(nowPlaying.source)"
             if line != lastLogged { log(line); lastLogged = line }

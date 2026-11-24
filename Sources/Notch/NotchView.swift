@@ -63,7 +63,7 @@ struct NotchView: View {
                    topRadius: topRadius.wrappedValue, bottomRadius: bottomRadius.wrappedValue,
                    bubble: bubble.wrappedValue, bubbleWidth: model.layout.bubbleWidth,
                    bubbleHeight: model.layout.geometry.notchSize.height,
-                   background: look.background, tint: glowTint, glow: lift, edge: edge) {
+                   background: look.background, tint: glowTint, glow: lift, edge: edge, backdrop: model.cinemaStill) {
             content(for: shown.wrappedValue)
         } bubbleContent: {
             if let second = bubbleActivity.wrappedValue {
@@ -205,7 +205,7 @@ struct NotchView: View {
         case .compact:
             // Nothing can go in the middle: that's where the camera is.
             HStack(spacing: 0) {
-                CompactLeading(activity: model.compactActivity, ns: ns)
+                CompactLeading(activity: model.compactActivity, ns: ns, wideArtwork: model.compactArtworkWide)
                 Spacer(minLength: notch.width)
                 CompactTrailing(activity: model.compactActivity, tint: model.waveformTint)
                     .frame(maxWidth: model.liveLayout.compactSideWidth + model.liveLayout.pillExtra - 14, alignment: .trailing)   // never past the pill's edge
@@ -286,6 +286,7 @@ private struct IslandBody<Content: View, Bubble: View>: View, Animatable {
     let tint: Color
     let glow: Double
     let edge: Double
+    let backdrop: NSImage?                // a video's still, behind the open island
     @ViewBuilder let content: Content
     @ViewBuilder let bubbleContent: Bubble
 
@@ -305,7 +306,7 @@ private struct IslandBody<Content: View, Bubble: View>: View, Animatable {
         let shape = NotchShape(topRadius: topRadius, bottomRadius: bottomRadius)
         ZStack(alignment: .top) {
             ZStack(alignment: .top) {
-                IslandBackground(style: background, tint: tint, glow: glow)
+                IslandBackground(style: background, tint: tint, glow: glow, backdrop: backdrop)
                 content
                 EdgeHighlight(shape: shape, strength: edge)
             }
@@ -421,6 +422,7 @@ struct PageDots: View {
 private struct CompactLeading: View {
     let activity: Activity?
     let ns: Namespace.ID
+    var wideArtwork = false               // a video's picture: wide, in the same area as the square
 
     var body: some View {
         switch activity {
@@ -437,7 +439,8 @@ private struct CompactLeading: View {
             ProcessGlyph(process: process, size: 20)
                 .matchedGeometryEffect(id: "leading", in: ns)
         case let .nowPlaying(nowPlaying):
-            Artwork(url: nowPlaying.artworkURL, image: nowPlaying.artworkImage, size: 20)
+            Artwork(url: nowPlaying.artworkURL, image: nowPlaying.artworkImage,
+                    size: wideArtwork ? CGSize(width: 28, height: 16) : CGSize(width: 20, height: 20), video: wideArtwork)
                 .matchedGeometryEffect(id: "leading", in: ns)
         case .claude, .claudeUpdate:
             ClaudeGlyph(size: 20)
@@ -600,7 +603,9 @@ private struct NowPlayingExpanded: View {
     var body: some View {
         VStack(spacing: 12) {
             HStack(spacing: 14) {
-                Artwork(url: nowPlaying.artworkURL, image: nowPlaying.artworkImage, size: 52)
+                let wide = model.wideArtwork(nowPlaying)
+                Artwork(url: nowPlaying.artworkURL, image: nowPlaying.artworkImage,
+                        size: wide ? CGSize(width: 96, height: 54) : CGSize(width: 52, height: 52), video: wide)
                     .matchedGeometryEffect(id: "leading", in: ns)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(nowPlaying.title)
@@ -691,14 +696,17 @@ private struct HomeExpanded: View {
 private struct Artwork: View {
     let url: URL?
     var image: NSImage? = nil
-    let size: CGFloat
+    let size: CGSize
+    var video = false                     // a video's picture, wide; a film placeholder
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+        let side = min(size.width, size.height)
+        let shape = RoundedRectangle(cornerRadius: side * 0.22, style: .continuous)
         ZStack {
-            shape.fill(LinearGradient(colors: [.teal, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing))
-            Image(systemName: "music.note")
-                .font(.system(size: size * 0.45, weight: .semibold))
+            shape.fill(LinearGradient(colors: video ? [Color(white: 0.32), Color(white: 0.16)] : [.teal, .indigo],
+                                      startPoint: .topLeading, endPoint: .bottomTrailing))
+            Image(systemName: video ? "film" : "music.note")
+                .font(.system(size: side * 0.45, weight: .semibold))
                 .foregroundStyle(Color.white.opacity(0.9))
             if let image {
                 Image(nsImage: image).resizable().scaledToFill()
@@ -713,7 +721,7 @@ private struct Artwork: View {
                 }
             }
         }
-        .frame(width: size, height: size)
+        .frame(width: size.width, height: size.height)
         .clipShape(shape)
     }
 }
