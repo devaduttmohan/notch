@@ -38,6 +38,7 @@ import Combine
         startHealthAndKeepAwake(for: model)
         startPullRequests(for: model)
         startBuilds(for: model)
+        startNetwork(for: model)
         startLoad(for: model)
         startUpdates(for: model)
         model.openCustomiser = { [weak self] in self?.openCustomiser() }
@@ -139,6 +140,19 @@ import Combine
         model.prsSeen = { [weak self] in self?.prs.markSeen() }
         prs.onAwayChange = { [weak model] away in model?.away = away }
         prs.start()
+    }
+
+    /// Offline, and a VPN you use dropping. Back again: PRs and builds look straight away.
+    private func startNetwork(for model: NotchModel) {
+        let network = NetworkWatch.shared
+        network.onChange = { [weak model] trouble in model?.network = trouble }
+        network.onBanner = { [weak model] banner in model?.show(banner) }
+        network.onReconnect = { [weak self] in
+            self?.prs.refresh()
+            JenkinsWatcher.shared.refresh()
+        }
+        model.networkDismiss = { network.dismiss() }
+        network.start()
     }
 
     /// Jenkins builds you start: a pill with their progress, a banner when they end.

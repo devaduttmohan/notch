@@ -203,7 +203,7 @@ extension NotchModel {
         case .timer: return .orange
         case .claude, .claudeUpdate, .claudeBackground: return .claude
         case .meeting(let meeting): return meeting.color.color
-        case .process: return .orange
+        case .process, .network: return .orange
         case .pullRequests(let summary): return summary.needsYou ? .red : .prGreen
         case .builds(let summary): return summary.running.isEmpty && summary.unseenFailure ? .red : .buildBlue
         case .load(let load): return load.busy ? (load.cpuLevel == .critical || load.memoryLevel == .critical ? .red : .orange) : .loadCPU

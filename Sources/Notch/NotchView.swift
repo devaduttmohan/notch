@@ -437,6 +437,9 @@ private struct CompactLeading: View {
         case let .meeting(meeting):
             MeetingGlyph(meeting: meeting, size: 20)
                 .matchedGeometryEffect(id: "leading", in: ns)
+        case let .network(trouble):
+            NetworkGlyph(trouble: trouble)
+                .matchedGeometryEffect(id: "leading", in: ns)
         case let .process(process):
             ProcessGlyph(process: process, size: 20)
                 .matchedGeometryEffect(id: "leading", in: ns)
@@ -484,6 +487,8 @@ private struct CompactTrailing: View {
             }
         case let .meeting(meeting):
             MeetingCountdown(meeting: meeting)
+        case let .network(trouble):
+            NetworkDownTime(trouble: trouble)
         case let .process(process):
             ProcessLoad(process: process)
         case let .pullRequests(summary):
@@ -552,6 +557,8 @@ private struct ExpandedContent: View {
             HomeExpanded(model: model)
         case let .meeting(meeting):
             MeetingExpanded(meeting: meeting, ns: ns) { model.meetingAction?($0, meeting) }
+        case let .network(trouble):
+            NetworkExpanded(trouble: trouble, ns: ns) { model.networkDismiss?() }
         case let .process(process):
             ProcessExpanded(process: process, ns: ns) { action in model.processAction?(action, process) }
         case let .claudeUpdate(update):

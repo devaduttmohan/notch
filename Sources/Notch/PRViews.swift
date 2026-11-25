@@ -105,6 +105,8 @@ struct BubbleGlyph: View {
                 LoadBubble(load: load)
             case let .meeting(meeting):
                 MeetingGlyph(meeting: meeting, size: 18)
+            case let .network(trouble):
+                NetworkGlyph(trouble: trouble, size: 18)
             case let .timer(timer):
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     ProgressRing(fraction: 1 - max(0, timer.endsAt.timeIntervalSince(context.date)) / max(timer.duration, 1),

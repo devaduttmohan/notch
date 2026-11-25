@@ -137,7 +137,7 @@ apply instantly and save to `~/Library/Application Support/Notch/settings.json`.
   in the open island. PR, build and command alerts set to hide pass like any banner.
   Defaults are as before: Claude and Flock stay; PRs, builds and commands Auto.
 - **Modules:** switch Now Playing, Meetings, Claude Code, command alerts, timers,
-  battery and headphones on or off.
+  battery, headphones and Network on or off.
 - **Meetings:** calendar access, which calendars, when the pill appears, time left,
   chime, video calls only, and what's coming up.
 
@@ -145,7 +145,7 @@ apply instantly and save to `~/Library/Application Support/Notch/settings.json`.
 
 The pill shows the most important activity; the second splits off into a small **bubble**
 beside it (a third and more show as "+1"). Order: Claude needs you, a meeting starting now,
-a runaway process, music playing, a meeting soon, a timer, PR news, paused music. Hover
+a runaway process, being offline (or your VPN down), music playing, a meeting soon, a timer, PR news, paused music. Hover
 the pill to open its activity, or the bubble to open the bubble's. Open, the camera row
 holds a **tab per activity** (page dots when there are many): click one, or two-finger
 swipe across the island, and the page slides over while the island springs to its height.
@@ -282,6 +282,21 @@ then, banner and all; during the meeting it hides the rest of it), and **Skip me
 hides it to its end, with no banner or chime. Customise › Meetings › Coming up has
 **Remind me** to undo a skip. Neither touches your calendar or the invite, and Notch
 forgets them if it quits.
+
+## Network
+
+When the Mac goes offline, after 5 seconds: a "You're offline" banner, then a crossed-out
+Wi-Fi in the pill with how long it's been. A VPN you use (one Notch has seen connected, such
+as Jamf Trust's Private Access) is the same after 15 seconds down, with a crossed-out shield,
+since a VPN reconnects by itself when the Wi-Fi changes. Back: a banner saying how long it
+was down, and PRs and Jenkins look again straight away instead of waiting out their back-off.
+The open page has **Dismiss** (hidden until it's back) and **Network Settings**, or the VPN's
+app. Nothing counts in the first minute after launch or waking, and while the Mac is offline
+its VPN going down too isn't news of its own. A VPN tunnel's own route doesn't count as online.
+It reads macOS's own state (the network path, and System Settings' VPN services through
+SystemConfiguration); nothing is sent anywhere to check. Wi-Fi joined to a network with no
+internet behind it (a captive portal) still counts as online. Customise › Modules › Network
+can leave VPNs out.
 
 ## The three states
 
@@ -486,6 +501,7 @@ need their own route (not built yet).
 | `Settings.swift` | everything the customiser changes (`NotchSettings`, saved as JSON) |
 | `Appearance.swift` | background styles, edge highlight, album-art colour |
 | `Meetings.swift` + `MeetingViews.swift` | calendar (EventKit), join links, the meeting pill and panel |
+| `Network.swift` + `NetworkViews.swift` | offline and VPN drops (NWPathMonitor, SystemConfiguration), their pill and page |
 | `CustomiserWindow.swift`, `CustomiserView.swift`, `CustomiserControls.swift` | the customiser window, its panes, preview and controls |
 | `Resources/Info.plist` + `bin/notch` | the app bundle: build, sign, launch |
 | `SystemMonitor.swift` + `ProcessViews.swift` | runaway processes, low disk, heat; their pill and panel |

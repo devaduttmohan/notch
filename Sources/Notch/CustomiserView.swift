@@ -764,6 +764,8 @@ struct ModulesPane: View {
                        detail: "Checks, reviews and comments via gh.", isOn: $store.value.pullRequests)
             ModuleCard(symbol: "hammer.fill", color: .buildBlue, title: "Jenkins builds",
                        detail: "Builds you start, stage by stage.", isOn: $store.value.builds)
+            ModuleCard(symbol: "wifi", color: Color(red: 0.1, green: 0.7, blue: 0.72), title: "Network",
+                       detail: "Offline, and your VPN dropping.", isOn: $store.value.network)
         }
         if store.value.pullRequests {
             PullRequestsCard(store: store, prs: prs, account: prs.account)
@@ -785,6 +787,32 @@ struct ModulesPane: View {
                 .padding(.top, 14)
                 .transition(.opacity.combined(with: .offset(y: -8)))
         }
+        if store.value.network {
+            NetworkCard(store: store, network: .shared)
+                .padding(.top, 14)
+                .transition(.opacity.combined(with: .offset(y: -8)))
+        }
+    }
+}
+
+/// Network: whether a VPN dropping counts too, and the VPNs macOS knows about.
+private struct NetworkCard: View {
+    @ObservedObject var store: SettingsStore
+    @ObservedObject var network: NetworkWatch
+
+    var body: some View {
+        NCard(title: "Network", symbol: "wifi") {
+            NRow(title: "Warn when a VPN disconnects", detail: vpnDetail) {
+                NToggle(isOn: $store.value.vpnAlerts, tint: Palette.tint)
+            }
+            Text("Offline counts once it has lasted 5 seconds, a VPN once it has been down 15 (it reconnects by itself when the Wi-Fi changes), and neither in the first minute after waking. Only a VPN you've used since Notch started counts. Notch reads macOS's own network state; nothing is sent anywhere to check.")
+                .font(.system(size: 11)).foregroundStyle(Palette.tertiary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var vpnDetail: String {
+        guard !network.vpns.isEmpty else { return "No VPNs in System Settings." }
+        return network.vpns.map { "\($0.name): " + ($0.connected ? "connected" : "not connected") }.joined(separator: " · ")
     }
 }
 

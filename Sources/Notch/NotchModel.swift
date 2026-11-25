@@ -182,6 +182,27 @@ enum ProcessAction { case quit, forceQuit, snooze, ignore }
 /// The meeting page's buttons: hide it until it starts, or skip it altogether.
 enum MeetingAction { case dismiss, skip }
 
+/// The Mac offline, or a VPN you use disconnected (from `NetworkWatch`), and since when.
+struct NetworkTrouble: Equatable {
+    enum Kind: Equatable {
+        case offline
+        case vpn(name: String, app: URL?)
+    }
+    static let offlineKey = "offline"
+    var key: String                 // what Dismiss hides: offline, or that VPN
+    var kind: Kind
+    var since: Date
+
+    var name: String {
+        switch kind {
+        case .offline: "offline"
+        case .vpn(let name, _): name
+        }
+    }
+    var title: String { kind == .offline ? "You're offline" : "\(name) is disconnected" }
+    var symbol: String { kind == .offline ? "wifi.slash" : "shield.slash.fill" }
+}
+
 /// Your pull requests, as the island shows them: what's running, what's new.
 struct PRSummary: Equatable {
     var prs: [PullRequest]                  // yours and review requests, newest activity first
@@ -226,6 +247,7 @@ extension Activity {
         case .claudeUpdate: .claudeUpdates
         case .claudeBackground: .claudeBackground
         case .meeting: .meeting
+        case .network: .network
         case .process: .process
         case .nowPlaying: .music
         case .timer: .timer
@@ -268,12 +290,13 @@ enum PRAction {
 
 /// The kinds of thing the island shows; the open island has a page for each one that's live.
 enum ActivityKind: Hashable {
-    case claude, claudeUpdates, claudeBackground, meeting, process, music, timer, pullRequests, builds, load, home
+    case claude, claudeUpdates, claudeBackground, meeting, network, process, music, timer, pullRequests, builds, load, home
 
     var symbol: String {
         switch self {
         case .claude, .claudeUpdates, .claudeBackground: "sparkle"
         case .meeting: MeetingIcon.calendarName
+        case .network: "wifi.slash"
         case .process: "flame.fill"
         case .music: "music.note"
         case .timer: "timer"
@@ -288,6 +311,7 @@ enum ActivityKind: Hashable {
         case .claude: "Claude"
         case .claudeUpdates, .claudeBackground: "Claude"
         case .meeting: "Meeting"
+        case .network: "Network"
         case .process: "Process"
         case .music: "Music"
         case .timer: "Timer"
@@ -305,6 +329,7 @@ enum Activity: Equatable {
     case claudeUpdate(ClaudeUpdate)
     case claudeBackground([BackgroundTask])
     case meeting(Meeting)
+    case network(NetworkTrouble)
     case process(RunawayProcess)
     case pullRequests(PRSummary)
     case builds(BuildSummary)
@@ -328,6 +353,8 @@ enum Activity: Equatable {
     }
     /// The next or current meeting, kept up to date by `Meetings`.
     @Published var meeting: Meeting?
+    /// The Mac offline, or a VPN you use down (from `NetworkWatch`).
+    @Published var network: NetworkTrouble?
     /// A process working far too hard (from `SystemMonitor`).
     @Published var runaway: RunawayProcess?
     /// Keeping the Mac awake, and why (from `KeepAwake`).
@@ -354,6 +381,7 @@ enum Activity: Equatable {
     /// Set by the app.
     var processAction: ((ProcessAction, RunawayProcess) -> Void)?
     var meetingAction: ((MeetingAction, Meeting) -> Void)?
+    var networkDismiss: (() -> Void)?
     var prAction: ((PRAction) -> Void)?
     /// You've looked at the PR page: what was new is now seen.
     var prsSeen: (() -> Void)?
@@ -464,6 +492,7 @@ enum Activity: Equatable {
         if !new.claude || !new.claudeBackground { backgroundTasks.removeAll() }
         if !new.timers { timer = nil }
         if !new.meetings { meeting = nil }
+        if !new.network { network = nil }
         if !new.systemHealth { runaway = nil }
         if !new.pullRequests {
             prUpdates.removeAll()
@@ -539,6 +568,7 @@ enum Activity: Equatable {
         if let wait = claudeWaits.first { list.append(.claude(wait)) }
         if let meeting, meeting.prominent { list.append(.meeting(meeting)) }      // starting now beats music
         if let runaway { list.append(.process(runaway)) }
+        if let network { list.append(.network(network)) }
         if let load = loadInPill, load.pressing { list.append(.load(load)) }   // the Mac is struggling: say so
         if let nowPlaying, nowPlaying.isPlaying { list.append(.nowPlaying(nowPlaying)) }
         if let meeting, !meeting.prominent { list.append(.meeting(meeting)) }

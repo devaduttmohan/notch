@@ -54,6 +54,8 @@ struct NotchSettings: Codable, Equatable {
     var systemHealth = true
     var pullRequests = true
     var builds = false                        // Jenkins builds you start (on once you sign in)
+    var network = true                        // offline, and a VPN you use dropping
+    var vpnAlerts = true
     var jenkinsURL = ""
     var jenkinsUser = ""
     var jenkinsJobs: [String] = []            // jobs you've built (learned), for your build history
