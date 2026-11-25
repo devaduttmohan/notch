@@ -229,6 +229,8 @@ no permissions) every 2 s, every second while its page is open, nothing while yo
 The closed pill shows CPU on the left and memory used on the right (CPU only, or memory
 only, if you prefer): **always**, only **when busy** (the default: CPU averaging 80 % or more
 over 30 s, adjustable to 70 or 90, or memory pressure raised), or never (**island only**).
+Choosing its tab in the open island keeps it in the pill, busy or calm, until you choose
+another section (not with island only).
 A busy reading turns orange, a critical one red. Busy CPU or critical memory takes the
 pill from your music; memory pressure that's only elevated (a Mac that swaps all day) waits
 behind it, in the bubble. The open island's page has CPU over the

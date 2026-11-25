@@ -552,6 +552,12 @@ enum Activity: Equatable {
         if pinned == .builds, settings.builds, let builds, !builds.all.isEmpty, !list.contains(where: { $0.kind == .builds }) {
             list.append(.builds(builds))
         }
+        // CPU & memory, chosen: it keeps the pill while the Mac is calm too (set to When busy,
+        // it otherwise shows only while busy). Set to Island only, it stays in the island.
+        if pinned == .load, settings.loadMonitor, settings.loadPill != .never, let load,
+           !list.contains(where: { $0.kind == .load }) {
+            list.append(.load(load))
+        }
         // The section you chose leads, after anything that needs you right now.
         if let pinned, let index = list.firstIndex(where: { $0.kind == pinned }) {
             let chosen = list.remove(at: index)
