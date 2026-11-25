@@ -1600,10 +1600,15 @@ struct MeetingsPane: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(meeting.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
                                 Text(meeting.start.formatted(.dateTime.weekday(.abbreviated).hour().minute())
-                                     + (meeting.service.map { " · \($0)" } ?? ""))
+                                     + (meeting.service.map { " · \($0)" } ?? "")
+                                     + (meetings.isSkipped(meeting) ? " · Skipping" : ""))
                                     .font(.system(size: 11.5)).foregroundStyle(Palette.secondary)
                             }
                             Spacer()
+                            if meetings.isSkipped(meeting) {
+                                NButton(title: "Remind me", symbol: "bell.fill") { meetings.unskip(meeting) }
+                                    .help("You skipped it from the notch. Show it again, with its reminder.")
+                            }
                             if let url = meeting.joinURL {
                                 NButton(title: "Join", symbol: MeetingIcon.videoName + ".fill") { NSWorkspace.shared.open(url) }
                             }

@@ -9,6 +9,8 @@ import EventKit
 ///   the first five of the meeting) it outranks music.
 /// - When it starts: a banner and, if you like, a chime.
 /// - During it: the time left.
+/// - From the open island you can put one away: Dismiss hides it until it starts (once it has,
+///   for the rest of it); Skip meeting hides it to its end, with no banner or chime.
 /// Calendar access needs Notch to run as an app (bin/notch), so macOS asks on Notch's behalf.
 @MainActor final class Meetings: ObservableObject {
     enum Access: Equatable {
@@ -27,6 +29,8 @@ import EventKit
     @Published private(set) var calendars: [CalendarInfo] = []
     /// What's left of today and tomorrow morning, soonest first (the customiser lists it).
     @Published private(set) var upcoming: [Meeting] = []
+    /// Meetings you're not joining, each until its end (the customiser can undo it).
+    @Published private(set) var skipped: [String: Date] = [:]
 
     /// What the island should show (nil: nothing soon).
     var onChange: ((Meeting?) -> Void)?
@@ -36,6 +40,8 @@ import EventKit
     private var observers: [any NSObjectProtocol] = []
     private var tick: Timer?
     private var announced: Set<String> = []
+    /// Meetings dismissed from the island: hidden until this (the start, or the end).
+    private var dismissed: [String: Date] = [:]
     private var shown: Meeting?
     private var settingsWatch: AnyCancellable?
 
@@ -131,11 +137,13 @@ import EventKit
             .sorted { $0.start < $1.start }
         upcoming = Array(events.filter { $0.end > now }.prefix(6))
 
-        let pick = settings.meetings ? Self.pick(from: events, now: now, settings: settings) : nil
+        // What you've put away from the island isn't shown, and gets no banner when it starts.
+        let shown = showable(events, at: now)
+        let pick = settings.meetings ? Self.pick(from: shown, now: now, settings: settings) : nil
         publish(pick)
 
         // Starting now: a banner (and a chime) once.
-        if settings.meetings, let starting = events.first(where: { $0.start <= now && now.timeIntervalSince($0.start) < 45 }),
+        if settings.meetings, let starting = Self.startingNow(in: shown, at: now),
            !announced.contains(starting.id) {
             announced.insert(starting.id)
             if settings.meetingChime { Sounds.play("Ping") }
@@ -152,6 +160,51 @@ import EventKit
         tick = Timer.scheduledTimer(withTimeInterval: max(next + 0.05, 1), repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.evaluate() }
         }
+    }
+
+    // MARK: Putting one away
+
+    /// Dismiss: hidden until it starts, then back with its banner. Once it's under way, hidden
+    /// for the rest of it.
+    func dismiss(_ meeting: Meeting) {
+        let now = Date()
+        dismissed[Self.key(meeting)] = now < meeting.start ? meeting.start : meeting.end
+        log("meetings: dismissed \"\(meeting.title)\" " + (now < meeting.start ? "until it starts" : "for the rest of it"))
+        evaluate()
+    }
+
+    /// Skip meeting: hidden to its end, with no banner or chime when it starts.
+    func skip(_ meeting: Meeting) {
+        skipped[Self.key(meeting)] = meeting.end
+        log("meetings: not joining \"\(meeting.title)\"")
+        evaluate()
+    }
+
+    /// The customiser's undo: remind me after all.
+    func unskip(_ meeting: Meeting) {
+        skipped[Self.key(meeting)] = nil
+        log("meetings: joining \"\(meeting.title)\" after all")
+        evaluate()
+    }
+
+    /// What of `events` to show: not what you've put away. Forgets what's over.
+    func showable(_ events: [Meeting], at now: Date) -> [Meeting] {
+        dismissed = dismissed.filter { $0.value > now }
+        if skipped.contains(where: { $0.value <= now }) { skipped = skipped.filter { $0.value > now } }
+        return events.filter { skipped[Self.key($0)] == nil && dismissed[Self.key($0)] == nil }
+    }
+
+    func isSkipped(_ meeting: Meeting) -> Bool { skipped[Self.key(meeting)] != nil }
+
+    /// What and when, so the same meeting in two calendars is put away together (and one moved
+    /// to another time comes back).
+    private static func key(_ meeting: Meeting) -> String {
+        "\(meeting.title)@\(meeting.start.timeIntervalSince1970)-\(meeting.end.timeIntervalSince1970)"
+    }
+
+    /// Started in the last 45 seconds: the one to announce.
+    static func startingNow(in events: [Meeting], at now: Date) -> Meeting? {
+        events.first { $0.start <= now && now.timeIntervalSince($0.start) < 45 }
     }
 
     /// About to start beats under way; under way shows its time left (if wanted).

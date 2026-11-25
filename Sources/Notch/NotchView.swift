@@ -551,7 +551,7 @@ private struct ExpandedContent: View {
         case .home:
             HomeExpanded(model: model)
         case let .meeting(meeting):
-            MeetingExpanded(meeting: meeting, ns: ns)
+            MeetingExpanded(meeting: meeting, ns: ns) { model.meetingAction?($0, meeting) }
         case let .process(process):
             ProcessExpanded(process: process, ns: ns) { action in model.processAction?(action, process) }
         case let .claudeUpdate(update):

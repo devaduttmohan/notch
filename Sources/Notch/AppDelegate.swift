@@ -51,6 +51,12 @@ import Combine
         let meetings = Meetings()
         meetings.onChange = { [weak model] meeting in model?.meeting = meeting }
         meetings.onBanner = { [weak model] banner in model?.show(banner) }
+        model.meetingAction = { [weak meetings] action, meeting in
+            switch action {
+            case .dismiss: meetings?.dismiss(meeting)
+            case .skip: meetings?.skip(meeting)
+            }
+        }
         meetings.start()
         self.meetings = meetings
         customiser = Customiser(meetings: meetings, keepAwake: keepAwake, prs: prs)

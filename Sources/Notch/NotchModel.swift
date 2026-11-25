@@ -179,6 +179,9 @@ struct Meeting: Equatable, Identifiable {
 
 enum ProcessAction { case quit, forceQuit, snooze, ignore }
 
+/// The meeting page's buttons: hide it until it starts, or skip it altogether.
+enum MeetingAction { case dismiss, skip }
+
 /// Your pull requests, as the island shows them: what's running, what's new.
 struct PRSummary: Equatable {
     var prs: [PullRequest]                  // yours and review requests, newest activity first
@@ -350,6 +353,7 @@ enum Activity: Equatable {
     }
     /// Set by the app.
     var processAction: ((ProcessAction, RunawayProcess) -> Void)?
+    var meetingAction: ((MeetingAction, Meeting) -> Void)?
     var prAction: ((PRAction) -> Void)?
     /// You've looked at the PR page: what was new is now seen.
     var prsSeen: (() -> Void)?

@@ -87,10 +87,12 @@ struct DateTile: View {
     }
 }
 
-/// The open island for a meeting: what, when, where, and a big Join.
+/// The open island for a meeting: what, when, where, and a big Join. Underneath, Dismiss and
+/// Skip meeting (once it's under way: its progress, and Dismiss for the rest of it).
 struct MeetingExpanded: View {
     let meeting: Meeting
     let ns: Namespace.ID
+    let act: (MeetingAction) -> Void
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -121,9 +123,20 @@ struct MeetingExpanded: View {
                         PillButton(symbol: MeetingIcon.calendarName, title: "Open") { Meetings.openCalendarApp() }
                     }
                 }
-                if live {
-                    MeetingProgress(meeting: meeting, now: now)
-                        .transition(.blurReplace)
+                HStack(spacing: 8) {
+                    if live {
+                        MeetingProgress(meeting: meeting, now: now)
+                            .transition(.blurReplace)
+                    } else {
+                        Spacer()
+                    }
+                    PillButton(symbol: "checkmark", title: "Dismiss") { act(.dismiss) }
+                        .help(live ? "Hide it for the rest of the meeting" : "Hide it until the meeting starts")
+                    if !live {
+                        PillButton(symbol: "bell.slash.fill", title: "Skip meeting") { act(.skip) }
+                            .help("Not joining: no reminder when it starts, nothing while it runs")
+                            .transition(.blurReplace)
+                    }
                 }
             }
             .animation(Motion.animation(Motion.contentSwap), value: live)

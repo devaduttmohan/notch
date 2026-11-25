@@ -277,6 +277,12 @@ Webex, Slack huddles, Chime, Whereby links are found in the invite). When it
 starts: a banner and a chime; during it, the time left. All-day, cancelled and
 declined events are skipped. Nothing leaves the Mac.
 
+Not going? Under Join, **Dismiss** hides the meeting until it starts (it comes back
+then, banner and all; during the meeting it hides the rest of it), and **Skip meeting**
+hides it to its end, with no banner or chime. Customise › Meetings › Coming up has
+**Remind me** to undo a skip. Neither touches your calendar or the invite, and Notch
+forgets them if it quits.
+
 ## The three states
 
 | State | When | What it looks like |
