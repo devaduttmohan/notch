@@ -395,6 +395,11 @@ PostToolUse and SessionEnd:
   with the details) and move away, or press **Dismiss**. A brush past under half a
   second doesn't count. Several waiting show a count; a passing banner (charging, a
   build) shows over them and then they're back; "Needs you" takes priority.
+  Going to the session yourself reads its update too: typing in it (a prompt you typed;
+  `notchctl` passes on only whether you did, never the text), or opening it in the Claude
+  app after the update came (the app's session file records when you last focused it;
+  Notch watches that folder and reads only the first 4 KB of a changed file, and only
+  while such an update is waiting). One covering several sessions waits for the island.
 
 **Your Mac** (public IOKit / CoreAudio APIs, no permissions): **Charging** with a
 battery ring when you plug in, **Low Battery** at 20/10/5 %, and a banner when

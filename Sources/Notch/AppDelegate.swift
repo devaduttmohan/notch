@@ -10,6 +10,7 @@ import Combine
     private var claude: ClaudeCode?
     private var system: SystemEvents?
     private var meetings: Meetings?
+    private var claudeFocus: ClaudeAppFocus?
     private var customiser: Customiser?
     private var monitor: SystemMonitor?
     private let prs = PRWatcher()
@@ -254,6 +255,14 @@ import Combine
     /// `notchctl say | run | claude` arrive over a private local socket.
     private func startAlerts(for model: NotchModel) {
         let claude = ClaudeCode(model: model)
+        // Opening a session in the Claude app yourself reads its update, as Open in Claude does.
+        let focus = ClaudeAppFocus()
+        focus.waiting = { [weak model] in model?.waitingClaudeSessions ?? [:] }
+        focus.onFocus = { [weak model] session, at in
+            if let read = model?.sawClaudeSession(session, at: at) { log("claude: you opened \(read) in Claude; its update is read") }
+        }
+        focus.start()
+        claudeFocus = focus
         let alerts = AlertServer()
         alerts.onMessage = { [weak self, weak model, weak claude] message in
             let settings = SettingsStore.shared.value

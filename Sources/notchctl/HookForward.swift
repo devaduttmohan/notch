@@ -11,6 +11,12 @@ enum HookForward {
         if let tasks = hook["background_tasks"] as? [[String: Any]] {
             out["background_tasks"] = tasks.prefix(30).map(task)
         }
+        // You sent a message (UserPromptSubmit): whether you typed it, never its text. What Claude
+        // Code sends by itself (a background task's news, a compaction…) starts with a <tag>.
+        if hook["hook_event_name"] as? String == "UserPromptSubmit", let prompt = hook["prompt"] as? String {
+            let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            out["typed_prompt"] = !text.isEmpty && !text.hasPrefix("<")
+        }
         // A command started in the background (PostToolUse): its id and description, as it starts.
         if let input = hook["tool_input"] as? [String: Any], input["run_in_background"] as? Bool == true,
            let id = (hook["tool_response"] as? [String: Any])?["backgroundTaskId"] as? String {

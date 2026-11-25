@@ -1119,6 +1119,21 @@ enum Activity: Equatable {
         claudeUpdates.removeAll { $0.sessions.contains(session) }
     }
 
+    /// Claude updates about one session each, waiting to be read: session → when it arrived.
+    var waitingClaudeSessions: [String: Date] {
+        claudeUpdates.filter { $0.sessions.count == 1 }.reduce(into: [:]) { $0[$1.sessions[0]] = $1.since }
+    }
+
+    /// You went to a session yourself (opened it in the Claude app, or typed in it) at `time`:
+    /// its own update, if it came before then, is read. One covering several sessions waits for
+    /// the island. Returns the project of the update read, if any.
+    @discardableResult
+    func sawClaudeSession(_ session: String, at time: Date = Date()) -> String? {
+        guard let read = claudeUpdates.first(where: { $0.sessions == [session] && $0.since <= time }) else { return nil }
+        claudeUpdates.removeAll { $0.id == read.id }
+        return read.project ?? "a session"
+    }
+
     // MARK: Timer
 
     func startTimer(minutes: Double) {

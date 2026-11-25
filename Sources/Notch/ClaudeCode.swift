@@ -62,6 +62,10 @@ import AppKit
             lastWorking[session] = now
             model.claudeResumed(session: session)
             keepAwake?.claudeWorking(session: session, project: project)
+            // You typed in it (not a message Claude Code sent itself): its update is read.
+            if hook["typed_prompt"] as? Bool == true, let read = model.sawClaudeSession(session, at: now) {
+                log("claude: you replied in \(read); its update is read")
+            }
         case "PreToolUse", "PostToolUse":
             lastWorking[session] = now
             model.claudeResumed(session: session)
