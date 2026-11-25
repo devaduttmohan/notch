@@ -386,6 +386,9 @@ PostToolUse and SessionEnd:
   estimate or exit code for them, so the ring only turns, and a finished one simply
   leaves. Needs `notchctl` from this version (it forwards those fields). Switch it
   off in Customise › Modules › **Background tasks** (it needs Claude Code on).
+  Claude Code's watches on artifacts a session published ("live updates for artifact
+  …", for comments and new versions) run as long as the session does and do no work,
+  so they're left out; the log says how many a session has.
 - Finished / ended updates **stay on the notch until you look**: hover it (it opens
   with the details) and move away, or press **Dismiss**. A brush past under half a
   second doesn't count. Several waiting show a count; a passing banner (charging, a

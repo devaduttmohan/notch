@@ -27,6 +27,8 @@ import AppKit
     private var lastWorking: [String: Date] = [:]
     /// When each session last got a "Claude finished" banner.
     private var lastFinished: [String: Date] = [:]
+    /// How many artifact watches each session had at its last turn's end (logged when it changes).
+    private var watchesLeftOut: [String: Int] = [:]
     private var endedSessions: [(session: String, project: String, ran: TimeInterval?)] = []
     private var endedTimer: Timer?
 
@@ -76,6 +78,11 @@ import AppKit
             // What's still running in the background (from Claude Code 2.1.3xx; older ones send none).
             if let tasks = hook["background_tasks"] as? [[String: Any]] {
                 model.backgroundRunning(session: session, tasks.compactMap { Self.backgroundTask($0, session: session, project: project) })
+                let watches = tasks.filter(Self.isArtifactWatch).count
+                if watches != (watchesLeftOut[session] ?? 0) {
+                    log("claude: \(project) is watching \(watches) artifact\(watches == 1 ? "" : "s") for comments (not listed as background work)")
+                }
+                watchesLeftOut[session] = watches
             }
             let took = turnStarted.removeValue(forKey: session).map { now.timeIntervalSince($0) }
             if let took, took < Self.quietTurn {
@@ -90,6 +97,7 @@ import AppKit
         case "SessionEnd":
             turnStarted[session] = nil
             lastWorking[session] = nil
+            watchesLeftOut[session] = nil
             model.backgroundEnded(session: session)
             model.claudeResumed(session: session)
             keepAwake?.claudeIdle(session: session)
@@ -148,10 +156,20 @@ import AppKit
         guard let id = entry["id"] as? String, !id.isEmpty else { return nil }
         let status = (entry["status"] as? String ?? "").lowercased()
         guard !["completed", "failed", "killed", "stopped", "cancelled", "canceled", "done", "error"].contains(status) else { return nil }
+        guard !isArtifactWatch(entry) else { return nil }
         let kind = entry["type"] as? String ?? ""
         let description = (entry["description"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let title = description.isEmpty ? (kind == "shell" ? "A background command" : "Background work") : description
         return BackgroundTask(id: id, session: session, kind: kind, title: title, project: project, started: started)
+    }
+
+    /// Claude Code's watch on an artifact the session published ("live updates for artifact
+    /// Notch plan (…)"), so it hears of comments and new versions. It runs as long as the session
+    /// does and does no work, so it isn't background work worth a ring and a row.
+    nonisolated static func isArtifactWatch(_ entry: [String: Any]) -> Bool {
+        let kind = (entry["type"] as? String ?? "").lowercased()
+        let description = (entry["description"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return kind.contains("artifact") || description.hasPrefix("live updates for artifact")
     }
 
     /// The working folder's name ("~" for your home folder).
